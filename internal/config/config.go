@@ -52,6 +52,7 @@ type RoutingConfig struct {
 	RetryPerRequest            int  `yaml:"retry_per_request" json:"retryPerRequest"`
 	TimeoutSeconds             int  `yaml:"timeout_seconds" json:"timeoutSeconds"`
 	StreamIdleTimeoutSeconds   int  `yaml:"stream_idle_timeout_seconds" json:"streamIdleTimeoutSeconds"`
+	StreamWriteTimeoutSeconds  int  `yaml:"stream_write_timeout_seconds" json:"streamWriteTimeoutSeconds"`
 	StreamRetryBeforeFirstByte bool `yaml:"stream_retry_before_first_byte" json:"streamRetryBeforeFirstByte"`
 	RetryAmbiguousErrors       bool `yaml:"retry_ambiguous_errors" json:"retryAmbiguousErrors"`
 	AllowInsecureUpstreams     bool `yaml:"allow_insecure_upstreams" json:"allowInsecureUpstreams"`
@@ -102,6 +103,7 @@ func Default() Config {
 			RetryPerRequest:            3,
 			TimeoutSeconds:             120,
 			StreamIdleTimeoutSeconds:   120,
+			StreamWriteTimeoutSeconds:  30,
 			StreamRetryBeforeFirstByte: true,
 			RetryAmbiguousErrors:       false,
 			AllowInsecureUpstreams:     false,
@@ -163,6 +165,7 @@ func Load() (Config, error) {
 		{"GATEWAY_RETRY_PER_REQUEST", &cfg.Routing.RetryPerRequest},
 		{"GATEWAY_TIMEOUT_SECONDS", &cfg.Routing.TimeoutSeconds},
 		{"GATEWAY_STREAM_IDLE_TIMEOUT_SECONDS", &cfg.Routing.StreamIdleTimeoutSeconds},
+		{"GATEWAY_STREAM_WRITE_TIMEOUT_SECONDS", &cfg.Routing.StreamWriteTimeoutSeconds},
 		{"GATEWAY_MAX_CONCURRENT_REQUESTS", &cfg.Routing.MaxConcurrentRequests},
 		{"GATEWAY_MAX_CONCURRENT_PER_PROVIDER", &cfg.Routing.MaxConcurrentPerProvider},
 		{"GATEWAY_MAX_CONCURRENT_PER_KEY", &cfg.Routing.MaxConcurrentPerKey},
@@ -314,6 +317,9 @@ func (c Config) Validate() error {
 	}
 	if c.Routing.StreamIdleTimeoutSeconds < 1 {
 		return fmt.Errorf("routing.stream_idle_timeout_seconds must be >= 1")
+	}
+	if c.Routing.StreamWriteTimeoutSeconds < 1 {
+		return fmt.Errorf("routing.stream_write_timeout_seconds must be >= 1")
 	}
 	if c.Routing.MaxConcurrentRequests < 0 || c.Routing.MaxConcurrentPerProvider < 0 || c.Routing.MaxConcurrentPerKey < 0 {
 		return fmt.Errorf("routing concurrency limits must be >= 0")

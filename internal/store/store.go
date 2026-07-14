@@ -47,11 +47,14 @@ type Store struct {
 	keySuccessFlushMu   sync.Mutex
 	pendingKeySuccesses map[string]keySuccess
 
-	requestLogMu       sync.Mutex
-	requestLogFlushMu  sync.Mutex
-	pendingRequestLogs []model.RequestLog
-	droppedRequestLogs atomic.Uint64
-	maintenanceMu      sync.Mutex
+	requestLogMu          sync.Mutex
+	requestLogFlushMu     sync.Mutex
+	pendingRequestLogs    []model.RequestLog
+	requestMetricsMu      sync.Mutex
+	requestMetricsFlushMu sync.Mutex
+	pendingRequestMetrics map[string]dailyRequestMetric
+	droppedRequestLogs    atomic.Uint64
+	maintenanceMu         sync.Mutex
 
 	closeOnce sync.Once
 	closeErr  error
@@ -88,6 +91,11 @@ type keySuccess struct {
 	count       int
 	lastUsed    time.Time
 	resetHealth bool
+}
+
+type dailyRequestMetric struct {
+	requests int
+	tokens   int
 }
 
 const (
@@ -214,6 +222,22 @@ var schemaMigrations = []string{
 		PRIMARY KEY(provider_id,model_id)
 	);
 	CREATE INDEX IF NOT EXISTS idx_provider_models_discovered_at ON provider_models(discovered_at);`,
+	`CREATE TABLE IF NOT EXISTS request_metrics_daily (
+		day TEXT PRIMARY KEY,
+		request_count INTEGER NOT NULL DEFAULT 0,
+		total_tokens INTEGER NOT NULL DEFAULT 0,
+		updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+	);
+
+	CREATE TABLE IF NOT EXISTS upstream_affinity (
+		resource_id TEXT PRIMARY KEY,
+		provider_id TEXT NOT NULL,
+		key_id TEXT NOT NULL REFERENCES keys(id) ON DELETE CASCADE,
+		expires_at TEXT NOT NULL,
+		created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+	);
+	CREATE INDEX IF NOT EXISTS idx_upstream_affinity_expires_at ON upstream_affinity(expires_at);`,
 }
 
 func Open(path, secretPath string) (*Store, error) {
@@ -230,6 +254,9 @@ func OpenWithOptions(path, secretPath string, options Options) (*Store, error) {
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, err
+	}
+	if err := recoverRestoreTransaction(path, secretPath); err != nil {
+		return nil, fmt.Errorf("recover interrupted portable restore: %w", err)
 	}
 	c, err := newCryptor(secretPath)
 	if err != nil {
@@ -252,18 +279,19 @@ func OpenWithOptions(path, secretPath string, options Options) (*Store, error) {
 	db.SetMaxOpenConns(4)
 	db.SetMaxIdleConns(4)
 	s := &Store{
-		db:                  db,
-		crypto:              c,
-		options:             options,
-		location:            location,
-		path:                path,
-		secretPath:          secretPath,
-		secretCache:         make(map[string]cachedSecret),
-		gatewayKeyCache:     make(map[string]string),
-		pendingGatewayUsage: make(map[string]gatewayUsage),
-		pendingKeySuccesses: make(map[string]keySuccess),
-		pendingRequestLogs:  make([]model.RequestLog, 0, requestLogBatchSize),
-		gatewayUsageStop:    make(chan struct{}),
+		db:                    db,
+		crypto:                c,
+		options:               options,
+		location:              location,
+		path:                  path,
+		secretPath:            secretPath,
+		secretCache:           make(map[string]cachedSecret),
+		gatewayKeyCache:       make(map[string]string),
+		pendingGatewayUsage:   make(map[string]gatewayUsage),
+		pendingKeySuccesses:   make(map[string]keySuccess),
+		pendingRequestLogs:    make([]model.RequestLog, 0, requestLogBatchSize),
+		pendingRequestMetrics: make(map[string]dailyRequestMetric),
+		gatewayUsageStop:      make(chan struct{}),
 	}
 	if err := s.migrate(context.Background(), databaseExisted); err != nil {
 		_ = db.Close()
@@ -284,7 +312,7 @@ func (s *Store) Close() error {
 		s.gatewayUsageWG.Wait()
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		s.closeErr = errors.Join(s.flushGatewayUsage(ctx), s.flushKeySuccesses(ctx), s.flushRequestLogs(ctx), s.Checkpoint(ctx), s.db.Close())
+		s.closeErr = errors.Join(s.flushGatewayUsage(ctx), s.flushKeySuccesses(ctx), s.flushRequestLogs(ctx), s.flushRequestMetrics(ctx), s.Checkpoint(ctx), s.db.Close())
 	})
 	return s.closeErr
 }
@@ -354,12 +382,54 @@ func (s *Store) migrate(ctx context.Context, databaseExisted bool) error {
 			_ = tx.Rollback()
 			return fmt.Errorf("apply schema migration %d: %w", version, err)
 		}
+		if version == 5 {
+			if err := backfillRequestMetricsMigration(ctx, tx, s.location); err != nil {
+				_ = tx.Rollback()
+				return fmt.Errorf("backfill request metrics migration: %w", err)
+			}
+		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO schema_migrations (version,checksum) VALUES (?,?)`, version, migrationChecksum(migration)); err != nil {
 			_ = tx.Rollback()
 			return fmt.Errorf("record schema migration %d: %w", version, err)
 		}
 		if err := tx.Commit(); err != nil {
 			return fmt.Errorf("commit schema migration %d: %w", version, err)
+		}
+	}
+	return nil
+}
+
+func backfillRequestMetricsMigration(ctx context.Context, tx *sql.Tx, location *time.Location) error {
+	rows, err := tx.QueryContext(ctx, `SELECT total_tokens,created_at FROM request_logs`)
+	if err != nil {
+		return err
+	}
+	metrics := make(map[string]dailyRequestMetric)
+	for rows.Next() {
+		var tokens sql.NullInt64
+		var created string
+		if err := rows.Scan(&tokens, &created); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		day := parseTime(created).In(location).Format("2006-01-02")
+		metric := metrics[day]
+		metric.requests++
+		if tokens.Valid {
+			metric.tokens += int(tokens.Int64)
+		}
+		metrics[day] = metric
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	for day, metric := range metrics {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO request_metrics_daily (day,request_count,total_tokens) VALUES (?,?,?)`, day, metric.requests, metric.tokens); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -1032,11 +1102,26 @@ func (s *Store) RecordFailure(ctx context.Context, keyID string, status *int, me
 }
 
 func (s *Store) LogRequest(ctx context.Context, l model.RequestLog) error {
-	if s.options.DisableRequestLogging {
-		return nil
-	}
 	if l.CreatedAt.IsZero() {
 		l.CreatedAt = time.Now().UTC()
+	}
+	day := l.CreatedAt.In(s.location).Format("2006-01-02")
+	tokens := 0
+	if l.TotalTokens != nil {
+		tokens = *l.TotalTokens
+	}
+	s.requestMetricsMu.Lock()
+	metric := s.pendingRequestMetrics[day]
+	metric.requests++
+	metric.tokens += tokens
+	s.pendingRequestMetrics[day] = metric
+	flushMetrics := metric.requests >= requestLogBatchSize
+	s.requestMetricsMu.Unlock()
+	if s.options.DisableRequestLogging {
+		if flushMetrics {
+			return s.flushRequestMetrics(ctx)
+		}
+		return nil
 	}
 	s.requestLogMu.Lock()
 	s.pendingRequestLogs = append(s.pendingRequestLogs, l)
@@ -1051,6 +1136,9 @@ func (s *Store) LogRequest(ctx context.Context, l model.RequestLog) error {
 }
 
 func (s *Store) flushRequestLogs(ctx context.Context) error {
+	if err := s.flushRequestMetrics(ctx); err != nil {
+		return err
+	}
 	s.requestLogFlushMu.Lock()
 	defer s.requestLogFlushMu.Unlock()
 
@@ -1083,6 +1171,56 @@ func (s *Store) flushRequestLogs(ctx context.Context) error {
 		return err
 	}
 	return nil
+}
+
+func (s *Store) flushRequestMetrics(ctx context.Context) error {
+	s.requestMetricsFlushMu.Lock()
+	defer s.requestMetricsFlushMu.Unlock()
+
+	s.requestMetricsMu.Lock()
+	if len(s.pendingRequestMetrics) == 0 {
+		s.requestMetricsMu.Unlock()
+		return nil
+	}
+	batch := s.pendingRequestMetrics
+	s.pendingRequestMetrics = make(map[string]dailyRequestMetric)
+	s.requestMetricsMu.Unlock()
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		s.restoreRequestMetrics(batch)
+		return err
+	}
+	for day, metric := range batch {
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO request_metrics_daily (day,request_count,total_tokens,updated_at)
+			VALUES (?,?,?,CURRENT_TIMESTAMP)
+			ON CONFLICT(day) DO UPDATE SET
+				request_count=request_count+excluded.request_count,
+				total_tokens=total_tokens+excluded.total_tokens,
+				updated_at=CURRENT_TIMESTAMP
+		`, day, metric.requests, metric.tokens); err != nil {
+			_ = tx.Rollback()
+			s.restoreRequestMetrics(batch)
+			return err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		s.restoreRequestMetrics(batch)
+		return err
+	}
+	return nil
+}
+
+func (s *Store) restoreRequestMetrics(batch map[string]dailyRequestMetric) {
+	s.requestMetricsMu.Lock()
+	defer s.requestMetricsMu.Unlock()
+	for day, metric := range batch {
+		pending := s.pendingRequestMetrics[day]
+		pending.requests += metric.requests
+		pending.tokens += metric.tokens
+		s.pendingRequestMetrics[day] = pending
+	}
 }
 
 func (s *Store) restoreRequestLogs(batch []model.RequestLog) {
@@ -1213,13 +1351,11 @@ func (s *Store) Stats(ctx context.Context) (model.Stats, error) {
 		return st, err
 	}
 	now := time.Now().In(s.location)
-	start := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, s.location).UTC()
-	end := start.AddDate(0, 0, 1)
+	day := now.Format("2006-01-02")
 	if err := s.db.QueryRowContext(ctx, `
-		SELECT COUNT(*),COALESCE(SUM(total_tokens),0)
-		FROM request_logs
-		WHERE created_at>=? AND created_at<?
-	`, start.Format("2006-01-02 15:04:05"), end.Format("2006-01-02 15:04:05")).Scan(&st.TodayRequests, &st.TodayTokens); err != nil {
+		SELECT COALESCE(request_count,0),COALESCE(total_tokens,0)
+		FROM request_metrics_daily WHERE day=?
+	`, day).Scan(&st.TodayRequests, &st.TodayTokens); err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return st, err
 	}
 	recent, err := s.ListLogs(ctx, 10)

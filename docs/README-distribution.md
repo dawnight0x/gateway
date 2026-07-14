@@ -11,7 +11,7 @@ Local AI Gateway 是一个本地 AI API 网关，管理后台已经内嵌在程�
 首次运行前赋予执行权限：
 
 ```bash
-chmod +x gateway
+chmod +x gateway gateway-backup
 ./gateway
 ```
 

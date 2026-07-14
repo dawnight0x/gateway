@@ -9,25 +9,29 @@ import (
 	"sync/atomic"
 	"time"
 
+	"local-ai-gateway/internal/model"
 	"local-ai-gateway/internal/protocol"
 	"local-ai-gateway/internal/router"
 )
 
 type streamOutput struct {
-	w         http.ResponseWriter
-	status    int
-	committed bool
-	flusher   http.Flusher
+	w            http.ResponseWriter
+	status       int
+	committed    bool
+	flusher      http.Flusher
+	controller   *http.ResponseController
+	writeTimeout time.Duration
 }
 
 const (
-	maxSSELineSize  = 8 << 20
-	maxSSEEventSize = 16 << 20
+	maxSSELineSize        = 8 << 20
+	maxSSEEventSize       = 16 << 20
+	maxStreamToolArgument = 16 << 20
 )
 
-func newStreamOutput(w http.ResponseWriter, status int) *streamOutput {
+func newStreamOutput(w http.ResponseWriter, status int, writeTimeout time.Duration) *streamOutput {
 	flusher, _ := w.(http.Flusher)
-	return &streamOutput{w: w, status: status, flusher: flusher}
+	return &streamOutput{w: w, status: status, flusher: flusher, controller: http.NewResponseController(w), writeTimeout: writeTimeout}
 }
 
 func (o *streamOutput) commit() {
@@ -46,30 +50,39 @@ func (o *streamOutput) write(data []byte) error {
 	if len(data) == 0 {
 		return nil
 	}
+	if o.writeTimeout > 0 {
+		_ = o.controller.SetWriteDeadline(time.Now().Add(o.writeTimeout))
+	}
 	o.commit()
 	if _, err := o.w.Write(data); err != nil {
 		return err
 	}
-	if o.flusher != nil {
-		o.flusher.Flush()
+	if err := o.controller.Flush(); err != nil {
+		if errors.Is(err, http.ErrNotSupported) && o.flusher != nil {
+			o.flusher.Flush()
+			return nil
+		}
+		return err
 	}
 	return nil
 }
 
-func (s *Service) pipeStream(w http.ResponseWriter, resp *http.Response, inbound, upstream string) attemptResult {
+func (s *Service) pipeStream(w http.ResponseWriter, resp *http.Response, key model.Key, inbound, upstream string) attemptResult {
 	forwardResponseMetadataHeaders(w.Header(), resp.Header)
-	output := newStreamOutput(w, resp.StatusCode)
+	output := newStreamOutput(w, resp.StatusCode, time.Duration(s.cfg.Routing.StreamWriteTimeoutSeconds)*time.Second)
 	if !s.cfg.Routing.StreamRetryBeforeFirstByte {
 		output.commit()
 	}
 
 	state := &protocol.StreamState{
-		DisableAggregate:  inbound != router.ProtocolOpenAIResponses || upstream == router.ProtocolOpenAIResponses,
-		MaxAggregateBytes: maxStreamAggregate,
+		DisableAggregate:     inbound != router.ProtocolOpenAIResponses || upstream == router.ProtocolOpenAIResponses,
+		MaxAggregateBytes:    maxStreamAggregate,
+		MaxToolArgumentBytes: maxStreamToolArgument,
 	}
 	var event string
 	var dataLines []string
 	dataBytes := 0
+	recordedResources := 0
 	processEvent := func() error {
 		if len(dataLines) == 0 {
 			event = ""
@@ -83,6 +96,10 @@ func (s *Service) pipeStream(w http.ResponseWriter, resp *http.Response, inbound
 		dataBytes = 0
 		if err != nil {
 			return err
+		}
+		if inbound == router.ProtocolOpenAIResponses && len(state.ResourceIDs) > recordedResources {
+			s.recordResponseAffinity(resp.Request.Context(), state.ResourceIDs[recordedResources:], key)
+			recordedResources = len(state.ResourceIDs)
 		}
 		for _, frame := range frames {
 			if err := output.write(encodeSSEFrame(frame)); err != nil {
@@ -150,7 +167,11 @@ func (s *Service) pipeStream(w http.ResponseWriter, resp *http.Response, inbound
 			}
 		}
 	}
-	return attemptResult{ok: true, committed: true, status: resp.StatusCode, usage: state.Usage}
+	resourceIDs := append([]string(nil), state.ResourceIDs...)
+	if state.ID != "" {
+		resourceIDs = append(resourceIDs, state.ID)
+	}
+	return attemptResult{ok: true, committed: true, status: resp.StatusCode, usage: state.Usage, responseResourceIDs: resourceIDs}
 }
 
 func streamFailure(output *streamOutput, status int, usage protocol.Usage, err error, retryBeforeFirstByte bool) attemptResult {

@@ -33,7 +33,9 @@ type StreamState struct {
 	Tools                map[int]*streamToolState
 	DisableAggregate     bool
 	MaxAggregateBytes    int
+	MaxToolArgumentBytes int
 	aggregateBytes       int
+	ResourceIDs          []string
 }
 
 type streamToolState struct {
@@ -57,14 +59,15 @@ type normalizedToolCall struct {
 }
 
 type normalizedStreamEvent struct {
-	ID        string
-	Model     string
-	Text      string
-	Reasoning string
-	ToolCalls []normalizedToolCall
-	Finish    string
-	Usage     Usage
-	Done      bool
+	ID          string
+	Model       string
+	Text        string
+	Reasoning   string
+	ToolCalls   []normalizedToolCall
+	Finish      string
+	Usage       Usage
+	Done        bool
+	ResourceIDs []string
 }
 
 func EnableStreaming(req ConvertedRequest, upstream string) (ConvertedRequest, error) {
@@ -85,13 +88,16 @@ func EnableStreaming(req ConvertedRequest, upstream string) (ConvertedRequest, e
 	return req, nil
 }
 
-func ConvertJSONResponseToStream(body []byte, inbound, upstream string) ([]StreamFrame, Usage, error) {
-	converted := ConvertResponse(body, inbound, upstream)
+func ConvertJSONResponseToStream(body []byte, inbound, upstream string) ([]StreamFrame, Usage, []string, error) {
+	converted, err := ConvertResponseChecked(body, inbound, upstream)
+	if err != nil {
+		return nil, Usage{}, nil, err
+	}
 	var raw map[string]any
 	if err := json.Unmarshal(converted, &raw); err != nil {
-		return nil, Usage{}, fmt.Errorf("decode upstream JSON stream fallback: %w", err)
+		return nil, Usage{}, nil, fmt.Errorf("decode upstream JSON stream fallback: %w", err)
 	}
-	state := &StreamState{ID: stringField(raw, "id"), Model: stringField(raw, "model"), Created: nowUnix(), Usage: ExtractUsage(converted)}
+	state := &StreamState{ID: stringField(raw, "id"), Model: stringField(raw, "model"), Created: nowUnix(), Usage: ExtractUsage(converted), ResourceIDs: ResponseResourceIDs(converted)}
 	if n := intFromAny(raw["created"]); n != nil {
 		state.Created = int64(*n)
 	} else if n := intFromAny(raw["created_at"]); n != nil {
@@ -130,12 +136,12 @@ func ConvertJSONResponseToStream(body []byte, inbound, upstream string) ([]Strea
 		}
 		events = append(events, normalizedStreamEvent{Finish: finish, Usage: state.Usage, Done: true})
 	default:
-		return nil, Usage{}, fmt.Errorf("JSON stream fallback is unsupported for inbound protocol %q", inbound)
+		return nil, Usage{}, nil, fmt.Errorf("JSON stream fallback is unsupported for inbound protocol %q", inbound)
 	}
 	var frames []StreamFrame
 	for _, event := range events {
 		if err := updateStreamState(state, event); err != nil {
-			return nil, Usage{}, err
+			return nil, Usage{}, nil, err
 		}
 		var rendered []StreamFrame
 		var err error
@@ -145,11 +151,11 @@ func ConvertJSONResponseToStream(body []byte, inbound, upstream string) ([]Strea
 			rendered, err = renderResponsesStream(event, state)
 		}
 		if err != nil {
-			return nil, Usage{}, err
+			return nil, Usage{}, nil, err
 		}
 		frames = append(frames, rendered...)
 	}
-	return frames, state.Usage, nil
+	return frames, state.Usage, state.ResourceIDs, nil
 }
 
 func ConvertStreamEvent(event string, data []byte, inbound, upstream string, state *StreamState) ([]StreamFrame, error) {
@@ -225,7 +231,7 @@ func normalizeStreamEvent(event string, data []byte, upstream string) (normalize
 		switch typeName {
 		case "response.created", "response.in_progress":
 			response := asMap(raw["response"])
-			return normalizedStreamEvent{ID: stringField(response, "id"), Model: stringField(response, "model"), Usage: responsesUsageFromMap(asMap(response["usage"]))}, nil
+			return normalizedStreamEvent{ID: stringField(response, "id"), Model: stringField(response, "model"), Usage: responsesUsageFromMap(asMap(response["usage"])), ResourceIDs: responseResourceIDsMap(response)}, nil
 		case "response.output_text.delta":
 			return normalizedStreamEvent{Text: stringField(raw, "delta")}, nil
 		case "response.reasoning_summary_text.delta":
@@ -244,7 +250,7 @@ func normalizeStreamEvent(event string, data []byte, upstream string) (normalize
 			if typeName == "response.incomplete" || stringField(response, "status") == "incomplete" {
 				finish = "length"
 			}
-			return normalizedStreamEvent{ID: stringField(response, "id"), Model: stringField(response, "model"), Finish: finish, Usage: responsesUsageFromMap(asMap(response["usage"])), Done: true}, nil
+			return normalizedStreamEvent{ID: stringField(response, "id"), Model: stringField(response, "model"), Finish: finish, Usage: responsesUsageFromMap(asMap(response["usage"])), Done: true, ResourceIDs: responseResourceIDsMap(response)}, nil
 		case "response.failed", "error":
 			return normalizedStreamEvent{}, fmt.Errorf("responses stream error: %s", stringOr(asMap(raw["error"])["message"], "upstream error"))
 		default:
@@ -310,6 +316,11 @@ func updateStreamState(state *StreamState, event normalizedStreamEvent) error {
 	if event.Model != "" {
 		state.Model = event.Model
 	}
+	for _, id := range event.ResourceIDs {
+		if id != "" && !containsString(state.ResourceIDs, id) {
+			state.ResourceIDs = append(state.ResourceIDs, id)
+		}
+	}
 	if state.Created == 0 {
 		state.Created = nowUnix()
 	}
@@ -328,6 +339,28 @@ func updateStreamState(state *StreamState, event normalizedStreamEvent) error {
 	}
 	mergeUsage(&state.Usage, event.Usage)
 	return nil
+}
+
+func responseResourceIDsMap(raw map[string]any) []string {
+	ids := []string{}
+	if id := stringField(raw, "id"); id != "" {
+		ids = append(ids, id)
+	}
+	if conversation, ok := raw["conversation"].(string); ok && conversation != "" {
+		ids = append(ids, conversation)
+	} else if id := stringField(asMap(raw["conversation"]), "id"); id != "" {
+		ids = append(ids, id)
+	}
+	return ids
+}
+
+func containsString(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
 }
 
 func renderOpenAIStream(event normalizedStreamEvent, state *StreamState) ([]StreamFrame, error) {
@@ -359,7 +392,11 @@ func renderOpenAIStream(event normalizedStreamEvent, state *StreamState) ([]Stre
 		if call.Name != "" && !tool.Added {
 			function["name"] = call.Name
 		}
-		if arguments := appendToolArguments(tool, call.Arguments, call.Done); arguments != "" {
+		arguments, err := appendToolArguments(state, tool, call.Arguments, call.Done)
+		if err != nil {
+			return nil, err
+		}
+		if arguments != "" {
 			function["arguments"] = arguments
 		}
 		converted := map[string]any{"index": tool.ChatIndex}
@@ -564,7 +601,11 @@ func renderResponsesStream(event normalizedStreamEvent, state *StreamState) ([]S
 			}
 			frames = append(frames, responsesFrame(state, "response.output_item.added", map[string]any{"output_index": tool.OutputIndex, "item": responseToolItem(tool, "in_progress")}))
 		}
-		if arguments := appendToolArguments(tool, call.Arguments, call.Done); arguments != "" {
+		arguments, err := appendToolArguments(state, tool, call.Arguments, call.Done)
+		if err != nil {
+			return nil, err
+		}
+		if arguments != "" {
 			frames = append(frames, responsesFrame(state, "response.function_call_arguments.delta", map[string]any{"item_id": tool.ID, "output_index": tool.OutputIndex, "delta": arguments}))
 		}
 	}
@@ -693,22 +734,29 @@ func ensureStreamTool(state *StreamState, index int) *streamToolState {
 	return tool
 }
 
-func appendToolArguments(tool *streamToolState, value string, complete bool) string {
+func appendToolArguments(state *StreamState, tool *streamToolState, value string, complete bool) (string, error) {
 	if value == "" {
-		return ""
+		return "", nil
 	}
 	existing := tool.Arguments.String()
 	delta := value
 	if complete && existing != "" {
 		if value == existing {
-			return ""
+			return "", nil
 		}
 		if strings.HasPrefix(value, existing) {
 			delta = strings.TrimPrefix(value, existing)
 		}
 	}
+	if state.MaxToolArgumentBytes > 0 && tool.Arguments.Len()+len(delta) > state.MaxToolArgumentBytes {
+		return "", fmt.Errorf("stream tool arguments exceed %d MiB per-call limit", state.MaxToolArgumentBytes>>20)
+	}
+	if state.MaxAggregateBytes > 0 && state.aggregateBytes+len(delta) > state.MaxAggregateBytes {
+		return "", fmt.Errorf("stream aggregate exceeds %d MiB limit", state.MaxAggregateBytes>>20)
+	}
+	state.aggregateBytes += len(delta)
 	tool.Arguments.WriteString(delta)
-	return delta
+	return delta, nil
 }
 
 func responseToolItem(tool *streamToolState, status string) map[string]any {

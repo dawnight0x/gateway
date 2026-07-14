@@ -3,6 +3,7 @@ package desktop
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -42,6 +43,9 @@ func TestAcquireLockBlocksSecondInstanceAndReleases(t *testing.T) {
 	if err := first.Release(); err != nil {
 		t.Fatal(err)
 	}
+	if err := first.Release(); err != nil {
+		t.Fatalf("idempotent release failed: %v", err)
+	}
 	third, exists, err := AcquireLock(path, false)
 	if err != nil {
 		t.Fatal(err)
@@ -50,6 +54,20 @@ func TestAcquireLockBlocksSecondInstanceAndReleases(t *testing.T) {
 		t.Fatalf("third lock = %v exists = %v, want acquired", third, exists)
 	}
 	_ = third.Release()
+}
+
+func TestAcquireLockDoesNotStealFromLiveProcess(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "gateway.lock")
+	if err := os.WriteFile(path, []byte("pid="+strconv.Itoa(os.Getpid())+"\nstarted_at=2000-01-01T00:00:00Z\ntoken=live\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	lock, exists, err := AcquireLock(path, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lock != nil || !exists {
+		t.Fatalf("lock = %v exists = %v, want live owner preserved", lock, exists)
+	}
 }
 
 func TestExists(t *testing.T) {

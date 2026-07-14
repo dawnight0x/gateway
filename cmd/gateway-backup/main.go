@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 
+	"local-ai-gateway/internal/buildinfo"
 	"local-ai-gateway/internal/store"
 )
 
@@ -20,6 +21,11 @@ func main() {
 func run(args []string) error {
 	if len(args) == 0 {
 		return usageError()
+	}
+	if args[0] == "version" {
+		info := buildinfo.Current()
+		_, err := fmt.Fprintf(os.Stdout, "gateway-backup %s commit=%s built=%s\n", info.Version, info.Commit, info.BuiltAt)
+		return err
 	}
 	if args[0] == "rotate-key" {
 		return rotateKey(args[1:])

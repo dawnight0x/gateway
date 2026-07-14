@@ -129,12 +129,26 @@ func ConvertRequest(body []byte, inbound, upstream, upstreamModel, pathModel str
 }
 
 func ConvertResponse(body []byte, inbound, upstream string) []byte {
-	if inbound == upstream {
+	out, err := ConvertResponseChecked(body, inbound, upstream)
+	if err != nil {
 		return body
 	}
+	return out
+}
+
+// ConvertResponseChecked validates successful upstream JSON before returning it
+// to the client. A malformed 2xx response is an upstream protocol failure, not
+// a successful opaque response.
+func ConvertResponseChecked(body []byte, inbound, upstream string) ([]byte, error) {
 	var raw map[string]any
 	if err := json.Unmarshal(body, &raw); err != nil {
-		return body
+		return nil, fmt.Errorf("decode successful %s response: %w", upstream, err)
+	}
+	if len(raw) == 0 {
+		return nil, fmt.Errorf("successful %s response is not a JSON object", upstream)
+	}
+	if inbound == upstream {
+		return body, nil
 	}
 	var converted any
 	switch {
@@ -155,13 +169,13 @@ func ConvertResponse(body []byte, inbound, upstream string) []byte {
 	case inbound == router.ProtocolAnthropic && upstream == router.ProtocolGemini:
 		converted = geminiResponseToAnthropic(raw)
 	default:
-		return body
+		return nil, fmt.Errorf("unsupported response conversion from %s to %s", upstream, inbound)
 	}
 	out, err := json.Marshal(converted)
 	if err != nil {
-		return body
+		return nil, fmt.Errorf("encode converted %s response: %w", inbound, err)
 	}
-	return out
+	return out, nil
 }
 
 func ExtractUsage(body []byte) Usage {
@@ -296,7 +310,7 @@ func responsesToChatCompletions(in map[string]any, modelName string) map[string]
 
 func chatCompletionsToResponses(in map[string]any, modelName string) map[string]any {
 	out := map[string]any{"model": modelName, "input": chatMessagesToResponses(in["messages"])}
-	copyFields(out, in, "stream", "temperature", "top_p", "frequency_penalty", "presence_penalty", "top_logprobs", "parallel_tool_calls", "metadata", "store", "service_tier", "prompt_cache_key", "safety_identifier")
+	copyFields(out, in, "stream", "temperature", "top_p", "frequency_penalty", "presence_penalty", "parallel_tool_calls", "metadata", "store", "service_tier", "prompt_cache_key", "safety_identifier", "user")
 	if v, ok := in["max_completion_tokens"]; ok {
 		out["max_output_tokens"] = v
 	} else if v, ok := in["max_tokens"]; ok {
@@ -470,10 +484,14 @@ func geminiToOpenAI(in map[string]any, modelName string) map[string]any {
 }
 
 func validateCrossProtocolRequest(raw map[string]any, inbound, upstream string) error {
-	if inbound == upstream ||
-		(inbound == router.ProtocolOpenAIResponses && upstream == router.ProtocolOpenAI) ||
-		(inbound == router.ProtocolOpenAI && upstream == router.ProtocolOpenAIResponses) {
+	if inbound == upstream {
 		return nil
+	}
+	if inbound == router.ProtocolOpenAIResponses && upstream == router.ProtocolOpenAI {
+		return validateResponsesToChat(raw)
+	}
+	if inbound == router.ProtocolOpenAI && upstream == router.ProtocolOpenAIResponses {
+		return validateChatToResponses(raw)
 	}
 	switch inbound {
 	case router.ProtocolOpenAI:
@@ -535,6 +553,141 @@ func validateCrossProtocolRequest(raw map[string]any, inbound, upstream string) 
 		}
 	}
 	return nil
+}
+
+func validateResponsesToChat(raw map[string]any) error {
+	for _, field := range []string{"background", "conversation", "previous_response_id", "include", "max_tool_calls", "prompt", "truncation"} {
+		if meaningful(raw[field]) {
+			return unsupportedCrossProtocol(router.ProtocolOpenAIResponses, router.ProtocolOpenAI, field)
+		}
+	}
+	if value, ok := raw["store"]; ok && value == true {
+		return unsupportedCrossProtocol(router.ProtocolOpenAIResponses, router.ProtocolOpenAI, "store=true state semantics")
+	}
+	for _, rawTool := range slice(raw["tools"]) {
+		if toolType := stringOr(asMap(rawTool)["type"], "function"); toolType != "function" {
+			return unsupportedCrossProtocol(router.ProtocolOpenAIResponses, router.ProtocolOpenAI, "built-in tool "+toolType)
+		}
+	}
+	if choice := asMap(raw["tool_choice"]); len(choice) > 0 {
+		if toolType := stringField(choice, "type"); toolType != "" && toolType != "function" && toolType != "allowed_tools" {
+			return unsupportedCrossProtocol(router.ProtocolOpenAIResponses, router.ProtocolOpenAI, "tool_choice "+toolType)
+		}
+	}
+	for _, rawItem := range slice(raw["input"]) {
+		item := asMap(rawItem)
+		typeName := stringOr(item["type"], "message")
+		switch typeName {
+		case "message":
+			if err := validateResponsesContentForChat(item["content"]); err != nil {
+				return err
+			}
+		case "function_call", "function_call_output":
+		default:
+			return unsupportedCrossProtocol(router.ProtocolOpenAIResponses, router.ProtocolOpenAI, "input item "+typeName)
+		}
+	}
+	return nil
+}
+
+func validateResponsesContentForChat(value any) error {
+	if _, ok := value.(string); ok || value == nil {
+		return nil
+	}
+	for _, rawPart := range slice(value) {
+		typeName := stringField(asMap(rawPart), "type")
+		switch typeName {
+		case "input_text", "output_text", "text", "input_image", "input_file", "file":
+		default:
+			return unsupportedCrossProtocol(router.ProtocolOpenAIResponses, router.ProtocolOpenAI, "content block "+typeName)
+		}
+	}
+	return nil
+}
+
+func validateChatToResponses(raw map[string]any) error {
+	if n := intFromAny(raw["n"]); n != nil && *n != 1 {
+		return unsupportedCrossProtocol(router.ProtocolOpenAI, router.ProtocolOpenAIResponses, "n other than 1")
+	}
+	for _, field := range []string{"functions", "function_call", "modalities", "audio", "prediction", "logit_bias", "logprobs", "top_logprobs", "seed", "stop", "web_search_options"} {
+		if meaningful(raw[field]) {
+			return unsupportedCrossProtocol(router.ProtocolOpenAI, router.ProtocolOpenAIResponses, field)
+		}
+	}
+	for _, rawTool := range slice(raw["tools"]) {
+		if toolType := stringOr(asMap(rawTool)["type"], "function"); toolType != "function" {
+			return unsupportedCrossProtocol(router.ProtocolOpenAI, router.ProtocolOpenAIResponses, "tool "+toolType)
+		}
+	}
+	return nil
+}
+
+// ProviderResourceRefs returns upstream-owned IDs that must remain on the same
+// provider/key. The bool is also true for unidentifiable provider resources
+// such as file/vector-store references, which still disable failover.
+func ProviderResourceRefs(body []byte) ([]string, bool, error) {
+	var raw map[string]any
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return nil, false, err
+	}
+	seen := map[string]struct{}{}
+	add := func(value string) {
+		if value = strings.TrimSpace(value); value != "" {
+			seen[value] = struct{}{}
+		}
+	}
+	add(stringField(raw, "previous_response_id"))
+	if conversation, ok := raw["conversation"].(string); ok {
+		add(conversation)
+	} else {
+		add(stringField(asMap(raw["conversation"]), "id"))
+	}
+	hasResources := len(seen) > 0
+	var walk func(any)
+	walk = func(value any) {
+		switch value := value.(type) {
+		case []any:
+			for _, item := range value {
+				walk(item)
+			}
+		case map[string]any:
+			for key, item := range value {
+				switch key {
+				case "file_id", "vector_store_id", "container_id":
+					hasResources = hasResources || strings.TrimSpace(stringOr(item, "")) != ""
+				case "vector_store_ids":
+					hasResources = hasResources || len(slice(item)) > 0
+				}
+				walk(item)
+			}
+		}
+	}
+	walk(raw["input"])
+	walk(raw["tools"])
+	refs := make([]string, 0, len(seen))
+	for id := range seen {
+		refs = append(refs, id)
+	}
+	return refs, hasResources, nil
+}
+
+func ResponseResourceIDs(body []byte) []string {
+	var raw map[string]any
+	if json.Unmarshal(body, &raw) != nil {
+		return nil
+	}
+	ids := []string{}
+	if id := stringField(raw, "id"); id != "" {
+		ids = append(ids, id)
+	}
+	if conversation := raw["conversation"]; conversation != nil {
+		if id, ok := conversation.(string); ok && id != "" {
+			ids = append(ids, id)
+		} else if id := stringField(asMap(conversation), "id"); id != "" {
+			ids = append(ids, id)
+		}
+	}
+	return ids
 }
 
 func validateTextOnlyContent(value any, inbound, upstream string) error {

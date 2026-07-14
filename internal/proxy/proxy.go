@@ -19,6 +19,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"local-ai-gateway/internal/buildinfo"
 	"local-ai-gateway/internal/config"
 	"local-ai-gateway/internal/model"
 	"local-ai-gateway/internal/protocol"
@@ -59,6 +60,7 @@ type attemptResult struct {
 	usage               protocol.Usage
 	endpointUnsupported bool
 	ambiguous           bool
+	responseResourceIDs []string
 }
 
 func New(st *store.Store, rt *router.Router, cfg config.Config) *Service {
@@ -159,8 +161,63 @@ func (s *Service) proxy(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": map[string]any{"message": "no available upstream key", "type": "no_available_key"}})
 		return
 	}
+	resourceRefs := []string(nil)
+	statefulRequest := false
+	affinityResolved := false
+	if inbound == router.ProtocolOpenAIResponses {
+		resourceRefs, statefulRequest, err = protocol.ProviderResourceRefs(body)
+		if err != nil {
+			s.log(r.Context(), requestID, inbound, "", "", modelName, http.StatusBadRequest, start, protocol.Usage{}, "invalid_request")
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": map[string]any{"message": "invalid Responses request: " + err.Error(), "type": "invalid_request"}})
+			return
+		}
+		var affinity *store.UpstreamAffinity
+		for _, resourceID := range resourceRefs {
+			matched, ok, lookupErr := s.store.GetUpstreamAffinity(r.Context(), resourceID)
+			if lookupErr != nil {
+				writeProxyStoreError(w, "load upstream resource affinity", lookupErr)
+				return
+			}
+			if !ok {
+				continue
+			}
+			if affinity != nil && (affinity.ProviderID != matched.ProviderID || affinity.KeyID != matched.KeyID) {
+				s.log(r.Context(), requestID, inbound, "", "", modelName, http.StatusConflict, start, protocol.Usage{}, "affinity_conflict")
+				writeJSON(w, http.StatusConflict, map[string]any{"error": map[string]any{"message": "Responses resources belong to different upstream keys", "type": "affinity_conflict"}})
+				return
+			}
+			copy := matched
+			affinity = &copy
+		}
+		if affinity != nil {
+			affinityResolved = true
+			filtered := candidates[:0]
+			for _, key := range candidates {
+				if key.ProviderID == affinity.ProviderID && key.ID == affinity.KeyID {
+					filtered = append(filtered, key)
+				}
+			}
+			candidates = filtered
+			if len(candidates) == 0 {
+				s.log(r.Context(), requestID, inbound, affinity.ProviderID, affinity.KeyID, modelName, http.StatusConflict, start, protocol.Usage{}, "affinity_unavailable")
+				writeJSON(w, http.StatusConflict, map[string]any{"error": map[string]any{"message": "the upstream key that owns this Responses resource is unavailable", "type": "affinity_unavailable"}})
+				return
+			}
+		}
+		if statefulRequest && !affinityResolved && len(candidates) > 1 {
+			s.log(r.Context(), requestID, inbound, "", "", modelName, http.StatusConflict, start, protocol.Usage{}, "affinity_unknown")
+			writeJSON(w, http.StatusConflict, map[string]any{"error": map[string]any{"message": "this Responses resource has no recorded upstream affinity; use a model with only one eligible upstream", "type": "affinity_unknown"}})
+			return
+		}
+	}
 
 	maxAttempts := s.cfg.Routing.RetryPerRequest
+	if statefulRequest {
+		maxAttempts = 1
+		if len(candidates) > 1 {
+			candidates = candidates[:1]
+		}
+	}
 	if maxAttempts > len(candidates) {
 		maxAttempts = len(candidates)
 	}
@@ -175,20 +232,31 @@ func (s *Service) proxy(w http.ResponseWriter, r *http.Request) {
 	busy := false
 	var last attemptResult
 	var lastProviderID, lastKeyID string
-	for _, key := range candidates {
-		if attempted >= maxAttempts {
-			break
+	remaining := append([]model.Key(nil), candidates...)
+	for len(remaining) > 0 && attempted < maxAttempts {
+		selected := -1
+		var releaseCapacity func()
+		for index, candidate := range remaining {
+			if release, ok := s.limits.tryAcquire(candidate.ProviderID, candidate.ID); ok {
+				selected = index
+				releaseCapacity = release
+				break
+			}
 		}
-		releaseProbe, probeOK := s.router.AcquireRecoveryProbe(key)
-		if !probeOK {
+		if selected < 0 {
 			busy = true
+			if !s.limits.wait(queueCtx) {
+				break
+			}
 			continue
 		}
-		releaseCapacity, capacityOK := s.limits.acquire(queueCtx, key.ProviderID, key.ID)
-		if !capacityOK {
-			releaseProbe()
+		key := remaining[selected]
+		remaining = append(remaining[:selected], remaining[selected+1:]...)
+		releaseProbe, probeOK := s.router.AcquireRecoveryProbe(key)
+		if !probeOK {
+			releaseCapacity()
 			busy = true
-			break
+			continue
 		}
 		s.inFlight.Add(1)
 		attempted++
@@ -199,8 +267,10 @@ func (s *Service) proxy(w http.ResponseWriter, r *http.Request) {
 		lastProviderID, lastKeyID = key.ProviderID, key.ID
 		native := router.ChooseUpstreamProtocol(inbound, key)
 		protocols := []string{native}
-		if fallback := openAIFallbackProtocol(r.URL.Path, inbound, native); fallback != "" {
-			protocols = append(protocols, fallback)
+		if !statefulRequest {
+			if fallback := openAIFallbackProtocol(r.URL.Path, inbound, native); fallback != "" {
+				protocols = append(protocols, fallback)
+			}
 		}
 		var result attemptResult
 		for protocolIndex, upstream := range protocols {
@@ -229,6 +299,12 @@ func (s *Service) proxy(w http.ResponseWriter, r *http.Request) {
 				result = clientCanceledResult(result)
 			}
 			if result.ok {
+				if inbound == router.ProtocolOpenAIResponses {
+					ids := append(append([]string(nil), resourceRefs...), result.responseResourceIDs...)
+					if err := s.store.PutUpstreamAffinity(r.Context(), ids, key.ProviderID, key.ID); err != nil {
+						slog.Warn("record upstream resource affinity failed", "key_id", key.ID, "error", err)
+					}
+				}
 				if err := s.router.RecordSuccess(r.Context(), key); err != nil {
 					slog.Warn("record upstream success failed", "key_id", key.ID, "error", err)
 				}
@@ -314,7 +390,7 @@ func (s *Service) forward(w http.ResponseWriter, r *http.Request, target string,
 
 	contentType := resp.Header.Get("Content-Type")
 	if strings.Contains(contentType, "text/event-stream") {
-		return s.pipeStream(w, resp, inbound, upstream)
+		return s.pipeStream(w, resp, key, inbound, upstream)
 	}
 
 	body, err := readResponseBody(resp.Body, maxProxyResponseBody)
@@ -325,25 +401,41 @@ func (s *Service) forward(w http.ResponseWriter, r *http.Request, target string,
 		return attemptResult{status: http.StatusBadGateway, errorType: "empty_response", message: "empty upstream response", retryable: true, ambiguous: true}
 	}
 	if converted.Stream {
-		frames, usage, err := protocol.ConvertJSONResponseToStream(body, inbound, upstream)
+		frames, usage, responseResourceIDs, err := protocol.ConvertJSONResponseToStream(body, inbound, upstream)
 		if err != nil {
 			return attemptResult{status: http.StatusBadGateway, errorType: "protocol_error", message: err.Error(), retryable: true, ambiguous: true}
 		}
-		output := newStreamOutput(w, resp.StatusCode)
+		if inbound == router.ProtocolOpenAIResponses {
+			s.recordResponseAffinity(ctx, responseResourceIDs, key)
+		}
+		output := newStreamOutput(w, resp.StatusCode, time.Duration(s.cfg.Routing.StreamWriteTimeoutSeconds)*time.Second)
 		for _, frame := range frames {
 			if err := output.write(encodeSSEFrame(frame)); err != nil {
 				return attemptResult{committed: output.committed, status: resp.StatusCode, errorType: "stream_interrupted", message: err.Error(), usage: usage}
 			}
 		}
-		return attemptResult{ok: true, committed: output.committed, status: resp.StatusCode, usage: usage}
+		return attemptResult{ok: true, committed: output.committed, status: resp.StatusCode, usage: usage, responseResourceIDs: responseResourceIDs}
 	}
-	out := protocol.ConvertResponse(body, inbound, upstream)
+	out, err := protocol.ConvertResponseChecked(body, inbound, upstream)
+	if err != nil {
+		return attemptResult{status: http.StatusBadGateway, errorType: "protocol_error", message: err.Error(), retryable: true, ambiguous: true}
+	}
+	responseResourceIDs := protocol.ResponseResourceIDs(out)
+	if inbound == router.ProtocolOpenAIResponses {
+		s.recordResponseAffinity(ctx, responseResourceIDs, key)
+	}
 	forwardResponseHeaders(w.Header(), resp.Header)
 	w.WriteHeader(resp.StatusCode)
 	if _, err := w.Write(out); err != nil {
 		slog.Warn("write proxy response failed", "error", err)
 	}
-	return attemptResult{ok: true, status: resp.StatusCode, usage: protocol.ExtractUsage(out)}
+	return attemptResult{ok: true, status: resp.StatusCode, usage: protocol.ExtractUsage(out), responseResourceIDs: responseResourceIDs}
+}
+
+func (s *Service) recordResponseAffinity(ctx context.Context, resourceIDs []string, key model.Key) {
+	if err := s.store.PutUpstreamAffinity(ctx, resourceIDs, key.ProviderID, key.ID); err != nil {
+		slog.Warn("record upstream resource affinity failed", "key_id", key.ID, "error", err)
+	}
 }
 
 func clientCanceledResult(result attemptResult) attemptResult {
@@ -411,7 +503,7 @@ func (s *Service) status(w http.ResponseWriter, r *http.Request) {
 		writeProxyStoreError(w, "load status statistics", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"service": map[string]any{"status": "ok", "proxyUrl": s.cfg.PublicURL()}, "stats": stats})
+	writeJSON(w, http.StatusOK, map[string]any{"service": map[string]any{"status": "ok", "proxyUrl": s.cfg.PublicURL(), "build": buildinfo.Current()}, "stats": stats})
 }
 
 func (s *Service) metrics(w http.ResponseWriter, r *http.Request) {

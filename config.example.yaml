@@ -26,6 +26,8 @@ routing:
   timeout_seconds: 120
   # 流式响应允许无限总时长，但连续这么久没有收到任何数据就中止。
   stream_idle_timeout_seconds: 120
+  # 每次向流式客户端写数据的最长等待时间，防止慢客户端长期占用并发槽。
+  stream_write_timeout_seconds: 30
   stream_retry_before_first_byte: true
   # 网络错误、5xx、空 2xx 等可能已经在上游执行，默认不跨 Key 重试以避免重复计费。
   retry_ambiguous_errors: false

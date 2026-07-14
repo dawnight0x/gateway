@@ -139,6 +139,7 @@ Copy-Item config.example.yaml config.yaml
 - `GATEWAY_LOG_MAX_BACKUPS`
 - `GATEWAY_TIMEOUT_SECONDS`
 - `GATEWAY_STREAM_IDLE_TIMEOUT_SECONDS`
+- `GATEWAY_STREAM_WRITE_TIMEOUT_SECONDS`
 - `GATEWAY_STREAM_RETRY_BEFORE_FIRST_BYTE`
 - `GATEWAY_RETRY_AMBIGUOUS_ERRORS`
 - `GATEWAY_ALLOW_INSECURE_UPSTREAMS`
@@ -175,5 +176,5 @@ npm run build:admin
 .\scripts\smoke.ps1
 ```
 
-烟测默认使用 `127.0.0.1:8787` 和系统临时目录启动无托盘实例，验证健康检查、后台资源、安全响应头、状态接口、日志创建和重复启动退出行为。端口被占用时会直接失败，不会终止任何既有进程；可用 `-Port` 指定其他端口。
+烟测默认使用 `127.0.0.1:28787` 和系统临时目录启动无托盘实例，验证健康检查、后台资源、安全响应头、状态接口、日志创建和重复启动退出行为。端口被占用时会直接失败，不会终止任何既有进程；可用 `-Port` 指定其他端口。
 烟测还会验证管理 API 未带 Token 时返回 401，带 `GATEWAY_ADMIN_TOKEN` 时正常访问。

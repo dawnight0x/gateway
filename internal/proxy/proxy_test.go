@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -398,6 +399,111 @@ func TestOpenAIResponsesFallsBackToChatCompletions(t *testing.T) {
 	}
 	if strings.Join(paths, ",") != "/v1/responses,/v1/chat/completions" {
 		t.Fatalf("paths = %#v", paths)
+	}
+}
+
+func TestStatefulResponsesDoesNotFallBackToChatCompletions(t *testing.T) {
+	var chatCalls atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/chat/completions" {
+			chatCalls.Add(1)
+		}
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": map[string]any{"message": "not found"}})
+	}))
+	defer upstream.Close()
+
+	ctx := context.Background()
+	st := testStore(t)
+	_, _ = st.UpsertProvider(ctx, model.Provider{ID: "p", Name: "p", Type: model.ProviderOpenAICompatible, BaseURL: upstream.URL, Enabled: true})
+	_, _ = st.UpsertKey(ctx, model.Key{ID: "k", ProviderID: "p", Name: "k", Secret: "secret", Enabled: true})
+	gatewayKey, _ := st.CreateGatewayKey(ctx, "test")
+	gw := testGateway(t, st, config.Default())
+	defer gw.Close()
+
+	req, _ := http.NewRequest(http.MethodPost, gw.URL+"/v1/responses", strings.NewReader(`{"model":"gpt-5","input":"next","previous_response_id":"resp_existing"}`))
+	req.Header.Set("Authorization", "Bearer "+gatewayKey.Plaintext)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	if chatCalls.Load() != 0 {
+		t.Fatalf("stateful request made %d Chat fallback calls", chatCalls.Load())
+	}
+}
+
+func TestResponsesAffinitySticksToOriginalKey(t *testing.T) {
+	var firstCalls, secondCalls atomic.Int32
+	first := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		firstCalls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"resp_affinity","object":"response","status":"completed","model":"gpt","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"first"}]}]}`))
+	}))
+	defer first.Close()
+	second := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		secondCalls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"resp_wrong","object":"response","status":"completed","model":"gpt","output":[]}`))
+	}))
+	defer second.Close()
+
+	ctx := context.Background()
+	st := testStore(t)
+	_, _ = st.UpsertProvider(ctx, model.Provider{ID: "first", Name: "first", Type: model.ProviderOpenAICompatible, BaseURL: first.URL, Priority: 100, Enabled: true})
+	_, _ = st.UpsertProvider(ctx, model.Provider{ID: "second", Name: "second", Type: model.ProviderOpenAICompatible, BaseURL: second.URL, Priority: 1, Enabled: true})
+	_, _ = st.UpsertKey(ctx, model.Key{ID: "first-key", ProviderID: "first", Name: "first", Secret: "secret", Enabled: true})
+	_, _ = st.UpsertKey(ctx, model.Key{ID: "second-key", ProviderID: "second", Name: "second", Secret: "secret", Enabled: true})
+	gatewayKey, _ := st.CreateGatewayKey(ctx, "test")
+	gw := testGateway(t, st, config.Default())
+	defer gw.Close()
+
+	doResponses := func(body string) {
+		req, _ := http.NewRequest(http.MethodPost, gw.URL+"/v1/responses", strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+gatewayKey.Plaintext)
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		if res.StatusCode != http.StatusOK {
+			payload, _ := io.ReadAll(res.Body)
+			t.Fatalf("status = %d body = %s", res.StatusCode, payload)
+		}
+	}
+	doResponses(`{"model":"gpt","input":"first"}`)
+	_, _ = st.UpsertProvider(ctx, model.Provider{ID: "first", Name: "first", Type: model.ProviderOpenAICompatible, BaseURL: first.URL, Priority: 1, Enabled: true})
+	_, _ = st.UpsertProvider(ctx, model.Provider{ID: "second", Name: "second", Type: model.ProviderOpenAICompatible, BaseURL: second.URL, Priority: 200, Enabled: true})
+	time.Sleep(300 * time.Millisecond)
+	doResponses(`{"model":"gpt","input":"next","previous_response_id":"resp_affinity"}`)
+	if firstCalls.Load() != 2 || secondCalls.Load() != 0 {
+		t.Fatalf("affinity calls first=%d second=%d", firstCalls.Load(), secondCalls.Load())
+	}
+}
+
+func TestMalformedSuccessfulUpstreamResponseReturnsProtocolError(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`not-json`))
+	}))
+	defer upstream.Close()
+	ctx := context.Background()
+	st := testStore(t)
+	_, _ = st.UpsertProvider(ctx, model.Provider{ID: "p", Name: "p", Type: model.ProviderOpenAICompatible, BaseURL: upstream.URL, Enabled: true})
+	_, _ = st.UpsertKey(ctx, model.Key{ID: "k", ProviderID: "p", Name: "k", Secret: "secret", Enabled: true})
+	gatewayKey, _ := st.CreateGatewayKey(ctx, "test")
+	gw := testGateway(t, st, config.Default())
+	defer gw.Close()
+
+	req, _ := http.NewRequest(http.MethodPost, gw.URL+"/v1/chat/completions", strings.NewReader(`{"model":"gpt","messages":[{"role":"user","content":"hi"}]}`))
+	req.Header.Set("Authorization", "Bearer "+gatewayKey.Plaintext)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	body, _ := io.ReadAll(res.Body)
+	if res.StatusCode != http.StatusBadGateway || !strings.Contains(string(body), `"type":"protocol_error"`) {
+		t.Fatalf("status = %d body = %s", res.StatusCode, body)
 	}
 }
 

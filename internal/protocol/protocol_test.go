@@ -63,6 +63,10 @@ func TestCrossProtocolConversionRejectsUnsupportedFeaturesInsteadOfDroppingThem(
 		{"OpenAI image", `{"model":"gpt","messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":"https://example.test/a.png"}}]}]}`, router.ProtocolOpenAI, router.ProtocolGemini},
 		{"Anthropic tool", `{"model":"claude","messages":[{"role":"user","content":"hi"}],"tools":[{"name":"weather"}]}`, router.ProtocolAnthropic, router.ProtocolOpenAI},
 		{"Gemini safety", `{"contents":[{"parts":[{"text":"hi"}]}],"safetySettings":[{"category":"x"}]}`, router.ProtocolGemini, router.ProtocolOpenAI},
+		{"Responses state", `{"model":"gpt","input":"hi","previous_response_id":"resp_1"}`, router.ProtocolOpenAIResponses, router.ProtocolOpenAI},
+		{"Responses built-in tool", `{"model":"gpt","input":"hi","tools":[{"type":"web_search"}]}`, router.ProtocolOpenAIResponses, router.ProtocolOpenAI},
+		{"Chat multiple choices", `{"model":"gpt","messages":[{"role":"user","content":"hi"}],"n":2}`, router.ProtocolOpenAI, router.ProtocolOpenAIResponses},
+		{"Chat logprobs", `{"model":"gpt","messages":[{"role":"user","content":"hi"}],"logprobs":true}`, router.ProtocolOpenAI, router.ProtocolOpenAIResponses},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -70,6 +74,25 @@ func TestCrossProtocolConversionRejectsUnsupportedFeaturesInsteadOfDroppingThem(
 				t.Fatalf("conversion error = %v", err)
 			}
 		})
+	}
+}
+
+func TestConvertResponseCheckedRejectsMalformedSuccessfulPayload(t *testing.T) {
+	if _, err := ConvertResponseChecked([]byte(`not-json`), router.ProtocolOpenAI, router.ProtocolOpenAI); err == nil {
+		t.Fatal("malformed native response was accepted")
+	}
+	if _, err := ConvertResponseChecked([]byte(`[]`), router.ProtocolOpenAIResponses, router.ProtocolOpenAI); err == nil {
+		t.Fatal("non-object cross-protocol response was accepted")
+	}
+}
+
+func TestProviderResourceRefsFindsStateAndHostedResources(t *testing.T) {
+	refs, stateful, err := ProviderResourceRefs([]byte(`{"previous_response_id":"resp_1","conversation":{"id":"conv_1"},"input":[{"content":[{"type":"input_file","file_id":"file_1"}]}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !stateful || len(refs) != 2 {
+		t.Fatalf("refs = %#v stateful = %v", refs, stateful)
 	}
 }
 
@@ -231,7 +254,7 @@ func TestToolStreamsConvertBothDirections(t *testing.T) {
 
 func TestJSONResponsesCanBeRenderedAsStreams(t *testing.T) {
 	chatBody := []byte(`{"id":"chatcmpl-json","created":1700000000,"model":"gpt-5","choices":[{"message":{"role":"assistant","content":"hello"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":2,"total_tokens":3}}`)
-	chatFrames, usage, err := ConvertJSONResponseToStream(chatBody, router.ProtocolOpenAI, router.ProtocolOpenAI)
+	chatFrames, usage, _, err := ConvertJSONResponseToStream(chatBody, router.ProtocolOpenAI, router.ProtocolOpenAI)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -241,7 +264,7 @@ func TestJSONResponsesCanBeRenderedAsStreams(t *testing.T) {
 	}
 
 	responseBody := []byte(`{"id":"resp_json","object":"response","created_at":1700000000,"status":"completed","model":"gpt-5","output":[{"id":"msg_1","type":"message","role":"assistant","content":[{"type":"output_text","text":"hello"}]}],"usage":{"input_tokens":1,"output_tokens":2,"total_tokens":3}}`)
-	responseFrames, usage, err := ConvertJSONResponseToStream(responseBody, router.ProtocolOpenAIResponses, router.ProtocolOpenAIResponses)
+	responseFrames, usage, resourceIDs, err := ConvertJSONResponseToStream(responseBody, router.ProtocolOpenAIResponses, router.ProtocolOpenAIResponses)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -253,6 +276,9 @@ func TestJSONResponsesCanBeRenderedAsStreams(t *testing.T) {
 	}
 	if usage.TotalTokens == nil || *usage.TotalTokens != 3 {
 		t.Fatalf("usage = %#v", usage)
+	}
+	if len(resourceIDs) != 1 || resourceIDs[0] != "resp_json" {
+		t.Fatalf("resource IDs = %#v", resourceIDs)
 	}
 }
 
@@ -333,6 +359,14 @@ func TestOpenAIStreamConvertsToGemini(t *testing.T) {
 		if !strings.Contains(joined, expected) {
 			t.Fatalf("converted stream missing %q: %s", expected, joined)
 		}
+	}
+}
+
+func TestStreamToolArgumentsRespectPerCallLimit(t *testing.T) {
+	state := &StreamState{MaxAggregateBytes: 64, MaxToolArgumentBytes: 5}
+	_, err := ConvertStreamEvent("", []byte(`{"id":"chatcmpl-test","choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"tool","arguments":"123456"}}]}}]}`), router.ProtocolOpenAIResponses, router.ProtocolOpenAI, state)
+	if err == nil || !strings.Contains(err.Error(), "tool arguments") {
+		t.Fatalf("tool argument limit error = %v", err)
 	}
 }
 

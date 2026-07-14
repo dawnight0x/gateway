@@ -463,6 +463,7 @@
             <label><span>{{ t('routing.retryPerRequest') }}</span><input v-model.number="routing.retryPerRequest" type="number" min="1"></label>
             <label><span>{{ t('routing.timeoutSeconds') }}</span><input v-model.number="routing.timeoutSeconds" type="number" min="1"></label>
             <label><span>{{ t('routing.streamIdleTimeoutSeconds') }}</span><input v-model.number="routing.streamIdleTimeoutSeconds" type="number" min="1"></label>
+            <label><span>{{ t('routing.streamWriteTimeoutSeconds') }}</span><input v-model.number="routing.streamWriteTimeoutSeconds" type="number" min="1"></label>
             <label><span>{{ t('routing.maxConcurrentRequests') }}</span><input v-model.number="routing.maxConcurrentRequests" type="number" min="0"></label>
             <label><span>{{ t('routing.maxConcurrentPerProvider') }}</span><input v-model.number="routing.maxConcurrentPerProvider" type="number" min="0"></label>
             <label><span>{{ t('routing.maxConcurrentPerKey') }}</span><input v-model.number="routing.maxConcurrentPerKey" type="number" min="0"></label>

@@ -1,8 +1,12 @@
 package store
 
 import (
+	"archive/zip"
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -162,6 +166,147 @@ func TestPortableBackupRestoresDatabaseAndMasterKey(t *testing.T) {
 	}
 }
 
+func TestPortableBackupV2AuthenticatesDatabaseAndManifest(t *testing.T) {
+	dir := t.TempDir()
+	st, err := Open(filepath.Join(dir, "gateway.db"), filepath.Join(dir, "secret.key"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	backup, err := st.CreatePortableBackup(context.Background(), "correct horse battery staple")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, test := range []struct {
+		name  string
+		entry string
+		edit  func([]byte) []byte
+	}{
+		{name: "database", entry: "database.enc", edit: func(data []byte) []byte {
+			out := append([]byte(nil), data...)
+			out[len(out)-1] ^= 0x01
+			return out
+		}},
+		{name: "manifest", entry: "manifest.json", edit: func(data []byte) []byte {
+			out := append([]byte(nil), data...)
+			marker := []byte(`"databaseSha256": "`)
+			index := bytes.Index(out, marker)
+			if index < 0 {
+				t.Fatal("manifest checksum field not found")
+			}
+			index += len(marker)
+			if out[index] == '0' {
+				out[index] = '1'
+			} else {
+				out[index] = '0'
+			}
+			return out
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			tampered := filepath.Join(dir, "tampered-"+test.name+".zip")
+			rewriteZipEntry(t, backup.Path, tampered, test.entry, test.edit)
+			restoreDir := filepath.Join(dir, "restore-"+test.name)
+			err := RestorePortableBackup(tampered, filepath.Join(restoreDir, "gateway.db"), filepath.Join(restoreDir, "secret.key"), "correct horse battery staple", false)
+			if err == nil {
+				t.Fatal("tampered backup restored successfully")
+			}
+			if _, statErr := os.Stat(filepath.Join(restoreDir, "gateway.db")); !os.IsNotExist(statErr) {
+				t.Fatalf("tampered restore wrote database: %v", statErr)
+			}
+		})
+	}
+}
+
+func TestOpenRecoversInterruptedPortableRestore(t *testing.T) {
+	dir := t.TempDir()
+	databasePath := filepath.Join(dir, "gateway.db")
+	secretPath := filepath.Join(dir, "secret.key")
+	st, err := Open(databasePath, secretPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	originalDatabase, _ := os.ReadFile(databasePath)
+	originalSecret, _ := os.ReadFile(secretPath)
+	databaseBackup := databasePath + ".restore-old-test"
+	secretBackup := secretPath + ".restore-old-test"
+	if err := os.WriteFile(databaseBackup, originalDatabase, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(secretBackup, originalSecret, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	absoluteDatabase, _ := filepath.Abs(databasePath)
+	absoluteSecret, _ := filepath.Abs(secretPath)
+	journal, _ := json.Marshal(restoreTransaction{
+		Database: restoreTransactionFile{Target: absoluteDatabase, Backup: databaseBackup, Existed: true},
+		Secret:   restoreTransactionFile{Target: absoluteSecret, Backup: secretBackup, Existed: true},
+	})
+	if err := os.WriteFile(restoreJournalPath(absoluteDatabase), journal, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(databasePath, []byte("partial restore"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	recovered, err := Open(databasePath, secretPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := recovered.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(restoreJournalPath(absoluteDatabase)); !os.IsNotExist(err) {
+		t.Fatalf("restore journal was not removed: %v", err)
+	}
+}
+
+func rewriteZipEntry(t *testing.T, source, target, entryName string, edit func([]byte) []byte) {
+	t.Helper()
+	input, err := zip.OpenReader(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer input.Close()
+	outputFile, err := os.Create(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := zip.NewWriter(outputFile)
+	for _, item := range input.File {
+		reader, err := item.Open()
+		if err != nil {
+			t.Fatal(err)
+		}
+		data, err := io.ReadAll(reader)
+		_ = reader.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if item.Name == entryName {
+			data = edit(data)
+		}
+		writer, err := output.CreateHeader(&zip.FileHeader{Name: item.Name, Method: zip.Deflate})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := writer.Write(data); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := output.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := outputFile.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestStoreUsesConcurrentSQLiteConnections(t *testing.T) {
 	st, err := Open(filepath.Join(t.TempDir(), "gateway.db"), filepath.Join(t.TempDir(), "secret.key"))
 	if err != nil {
@@ -283,7 +428,8 @@ func TestStatsUsesAvailableKeysAndConfiguredDayBoundary(t *testing.T) {
 		{"before", start.Add(-time.Minute), 100},
 		{"inside", start.Add(time.Minute), 7},
 	} {
-		if _, err := st.db.ExecContext(ctx, `INSERT INTO request_logs (request_id,inbound_protocol,status,latency_ms,total_tokens,created_at) VALUES (?,'openai',200,1,?,?)`, item.id, item.tokens, item.created.Format("2006-01-02 15:04:05")); err != nil {
+		tokens := item.tokens
+		if err := st.LogRequest(ctx, model.RequestLog{RequestID: item.id, InboundProtocol: "openai", Status: 200, LatencyMS: 1, TotalTokens: &tokens, CreatedAt: item.created}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -297,6 +443,26 @@ func TestStatsUsesAvailableKeysAndConfiguredDayBoundary(t *testing.T) {
 	}
 	if stats.TodayRequests != 1 || stats.TodayTokens != 7 {
 		t.Fatalf("today stats = %#v", stats)
+	}
+}
+
+func TestStatsRetainedWhenDetailedRequestLoggingIsDisabled(t *testing.T) {
+	dir := t.TempDir()
+	st, err := OpenWithOptions(filepath.Join(dir, "gateway.db"), filepath.Join(dir, "secret.key"), Options{Timezone: "Asia/Singapore", DisableRequestLogging: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	tokens := 9
+	if err := st.LogRequest(context.Background(), model.RequestLog{RequestID: "metrics-only", InboundProtocol: "openai", Status: 200, TotalTokens: &tokens}); err != nil {
+		t.Fatal(err)
+	}
+	stats, err := st.Stats(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.TodayRequests != 1 || stats.TodayTokens != 9 || len(stats.Recent) != 0 {
+		t.Fatalf("metrics-only stats = %#v", stats)
 	}
 }
 

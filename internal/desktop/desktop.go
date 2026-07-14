@@ -1,6 +1,8 @@
 package desktop
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net/http"
@@ -10,12 +12,16 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
 type Lock struct {
-	path string
-	file *os.File
+	path     string
+	file     *os.File
+	token    string
+	mu       sync.Mutex
+	released bool
 }
 
 func DataDir(dbPath string) string {
@@ -44,6 +50,9 @@ func AcquireLock(path string, stale bool) (*Lock, bool, error) {
 		return nil, false, err
 	}
 	if stale {
+		if pid, ok := lockPID(path); ok && processAlive(pid) {
+			return nil, true, nil
+		}
 		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return nil, false, err
 		}
@@ -55,22 +64,71 @@ func AcquireLock(path string, stale bool) (*Lock, bool, error) {
 		}
 		return nil, false, err
 	}
-	if _, err := fmt.Fprintf(f, "pid=%d\nstarted_at=%s\n", os.Getpid(), time.Now().Format(time.RFC3339)); err != nil {
+	tokenBytes := make([]byte, 16)
+	if _, err := rand.Read(tokenBytes); err != nil {
 		_ = f.Close()
 		_ = os.Remove(path)
 		return nil, false, err
 	}
-	return &Lock{path: path, file: f}, false, nil
+	token := hex.EncodeToString(tokenBytes)
+	if _, err := fmt.Fprintf(f, "pid=%d\nstarted_at=%s\ntoken=%s\n", os.Getpid(), time.Now().Format(time.RFC3339), token); err != nil {
+		_ = f.Close()
+		_ = os.Remove(path)
+		return nil, false, err
+	}
+	if err := f.Sync(); err != nil {
+		_ = f.Close()
+		_ = os.Remove(path)
+		return nil, false, err
+	}
+	return &Lock{path: path, file: f, token: token}, false, nil
 }
 
 func (l *Lock) Release() error {
 	if l == nil {
 		return nil
 	}
-	if l.file != nil {
-		return errors.Join(l.file.Close(), os.Remove(l.path))
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.released {
+		return nil
 	}
-	return os.Remove(l.path)
+	l.released = true
+	closeErr := error(nil)
+	if l.file != nil {
+		closeErr = l.file.Close()
+		l.file = nil
+	}
+	content, err := os.ReadFile(l.path)
+	if errors.Is(err, os.ErrNotExist) {
+		return closeErr
+	}
+	if err != nil {
+		return errors.Join(closeErr, err)
+	}
+	if !strings.Contains(string(content), "token="+l.token+"\n") {
+		return closeErr
+	}
+	removeErr := os.Remove(l.path)
+	if errors.Is(removeErr, os.ErrNotExist) {
+		removeErr = nil
+	}
+	return errors.Join(closeErr, removeErr)
+}
+
+func lockPID(path string) (int, bool) {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return 0, false
+	}
+	for _, line := range strings.Split(string(content), "\n") {
+		if !strings.HasPrefix(line, "pid=") {
+			continue
+		}
+		pid, err := strconv.Atoi(strings.TrimSpace(strings.TrimPrefix(line, "pid=")))
+		return pid, err == nil && pid > 0
+	}
+	return 0, false
 }
 
 func TerminateMatchingListeners(port int, exePath string) error {

@@ -66,6 +66,23 @@ func TestRequestLimiterConcurrentLoadNeverExceedsGlobalLimit(t *testing.T) {
 	}
 }
 
+func TestRequestLimiterCanUseIdleAlternateKey(t *testing.T) {
+	limiter := newRequestLimiter(2, 2, 1)
+	releaseBusy, ok := limiter.tryAcquire("provider", "busy")
+	if !ok {
+		t.Fatal("failed to occupy first key")
+	}
+	defer releaseBusy()
+	if _, ok := limiter.tryAcquire("provider", "busy"); ok {
+		t.Fatal("busy key admitted a second request")
+	}
+	releaseIdle, ok := limiter.tryAcquire("provider", "idle")
+	if !ok {
+		t.Fatal("idle alternate key was ignored")
+	}
+	releaseIdle()
+}
+
 func BenchmarkRequestLimiterParallel(b *testing.B) {
 	limiter := newRequestLimiter(64, 16, 4)
 	b.RunParallel(func(pb *testing.PB) {
