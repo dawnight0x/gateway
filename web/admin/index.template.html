@@ -1,0 +1,566 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Local AI Gateway</title>
+  <link rel="icon" type="image/svg+xml" href="/admin/assets/app-icon.svg">
+  <script src="/admin/assets/theme-bootstrap.js"></script>
+  <link rel="stylesheet" href="/admin/assets/styles.css">
+</head>
+<body>
+  <div id="app" v-cloak>
+    <aside class="sidebar">
+      <div class="brand">
+        <img class="brand-mark" src="/admin/assets/app-icon.svg" alt="">
+        <div>
+          <strong>Local AI Gateway</strong>
+          <small>localhost:{{ port }}</small>
+        </div>
+      </div>
+
+      <nav class="nav">
+        <a v-for="item in navItems" :key="item.id" :href="'#' + item.id" :class="{active: activeSection === item.id}" @click.prevent="setActiveSection(item.id)">
+          <span class="nav-icon" aria-hidden="true">{{ item.icon }}</span>
+          <span>{{ t(item.label) }}</span>
+        </a>
+      </nav>
+
+      <div class="side-status">
+        <span class="status-dot" :class="{muted: !dashboard}"></span>
+        <div>
+          <strong>{{ dashboard?.service?.status || '-' }}</strong>
+          <small>{{ dashboard?.service?.proxyUrl || `http://localhost:${port}` }}</small>
+        </div>
+      </div>
+    </aside>
+
+    <main class="shell">
+      <header class="topbar">
+        <div class="headline">
+          <h1>{{ t(currentTitle) }}</h1>
+        </div>
+        <div class="top-actions">
+          <button class="ghost" type="button" @click="openSetup">{{ t('action.programmingSetup') }}</button>
+          <button class="ghost theme-toggle" type="button" @click="toggleTheme" :aria-label="t('action.theme')">
+            <span>{{ theme === 'dark' ? '☀' : '☾' }}</span>
+            {{ theme === 'dark' ? t('action.lightTheme') : t('action.darkTheme') }}
+          </button>
+          <button class="ghost" type="button" @click="setLang(lang === 'zh' ? 'en' : 'zh')">{{ lang === 'zh' ? 'English' : '中文' }}</button>
+          <button v-if="adminToken" class="ghost" type="button" @click="logoutAdmin">{{ t('auth.logout') }}</button>
+          <button type="button" :disabled="refreshing" @click="refresh">{{ refreshing ? t('action.refreshing') : t('action.refresh') }}</button>
+        </div>
+      </header>
+
+      <div v-if="refreshError" class="refresh-error" role="alert">{{ refreshError }}</div>
+
+      <section v-show="activeSection === 'dashboard'" class="section">
+        <article class="hero-panel">
+          <div>
+            <p class="eyebrow">{{ t('dashboard.gateway') }}</p>
+            <h2>{{ dashboard?.service?.proxyUrl || `http://localhost:${port}` }}</h2>
+            <p>{{ t('dashboard.gatewayCopy') }}</p>
+          </div>
+          <div class="protocol-strip">
+            <span>OpenAI</span>
+            <span>Anthropic</span>
+            <span>Gemini</span>
+          </div>
+        </article>
+        <div class="metric-grid">
+          <article class="metric" v-for="card in metricCards" :key="card.label">
+            <span>{{ t(card.label) }}</span>
+            <strong>{{ card.value }}</strong>
+          </article>
+        </div>
+        <div class="split">
+          <article class="panel">
+            <div class="panel-title">
+              <h2>{{ t('nav.providers') }}</h2>
+              <div class="panel-actions">
+                <button class="ghost" type="button" @click="openProviderForm">{{ t('action.addProvider') }}</button>
+                <button class="ghost" type="button" @click="openKeyForm()">{{ t('action.addKey') }}</button>
+              </div>
+            </div>
+            <div class="compact-list">
+              <div v-for="p in providers" :key="p.id" class="compact-row">
+                <div>
+                  <strong>{{ p.name }}</strong>
+                  <small>{{ providerTypeLabel(p.type) }} · {{ p.baseUrl }}</small>
+                </div>
+                <span :class="['pill', p.enabled ? 'ok' : 'bad']">{{ p.enabled ? t('status.enabled') : t('status.disabled') }}</span>
+              </div>
+              <div v-if="!providers.length" class="empty-state">
+                <strong>{{ t('empty.providers') }}</strong>
+                <small>{{ t('empty.providersHint') }}</small>
+              </div>
+            </div>
+          </article>
+          <article class="panel">
+            <div class="panel-title">
+              <h2>{{ t('dashboard.recent') }}</h2>
+            </div>
+            <div class="log-list">
+              <div v-for="log in recentLogs" :key="log.id" class="log-row">
+                <span>{{ log.status }}</span>
+                <strong>{{ log.model || '-' }}</strong>
+                <small>{{ log.inboundProtocol }} · {{ log.latencyMs }}ms · {{ log.errorType || 'ok' }}</small>
+              </div>
+              <div v-if="!recentLogs.length" class="empty-state">
+                <strong>{{ t('empty.logs') }}</strong>
+                <small>{{ t('empty.logsHint') }}</small>
+              </div>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section v-show="activeSection === 'providers'" class="section">
+        <article class="panel">
+            <div class="panel-title section-actions">
+              <div class="panel-actions">
+                <button class="ghost" type="button" @click="refreshBalances" :disabled="balanceRefreshing">{{ balanceRefreshing ? t('action.refreshingBalance') : t('action.refreshBalance') }}</button>
+                <button type="button" @click="openProviderForm">{{ t('action.addProvider') }}</button>
+              </div>
+          </div>
+          <div class="provider-summary-grid">
+            <div class="summary-card">
+              <span>{{ t('provider.summaryProviders') }}</span>
+              <strong>{{ providers.length }}</strong>
+              <small>{{ t('provider.summaryProvidersCopy') }}</small>
+            </div>
+            <div class="summary-card">
+              <span>{{ t('provider.summaryKeys') }}</span>
+              <strong>{{ keys.length }}</strong>
+              <small>{{ t('provider.summaryKeysCopy') }}</small>
+            </div>
+            <div class="summary-card">
+              <span>{{ t('provider.summaryEndpoint') }}</span>
+              <code>{{ dashboard?.service?.proxyUrl || 'http://localhost:18787' }}</code>
+              <small>{{ t('provider.summaryEndpointCopy') }}</small>
+            </div>
+          </div>
+          <form v-if="providerFormOpen && !providerForm.editingId" class="form-grid top-create-form" data-testid="provider-form" @submit.prevent="saveProvider">
+            <div v-if="formError" class="form-error">{{ formError }}</div>
+            <input v-model.trim="providerForm.id" :disabled="!!providerForm.editingId" :placeholder="t('placeholder.providerId')">
+            <input v-model.trim="providerForm.name" :placeholder="t('placeholder.name')">
+            <select v-model="providerForm.type">
+              <option v-for="type in providerTypes" :key="type.value" :value="type.value">{{ type.label }}</option>
+            </select>
+            <input v-model.trim="providerForm.baseUrl" :placeholder="t('placeholder.baseUrl')">
+            <input v-model.trim="providerForm.balancePath" :placeholder="t('placeholder.balancePath')">
+            <input v-model.number="providerForm.priority" type="number" :placeholder="t('placeholder.priority')">
+            <div class="model-select-field">
+              <select v-model="providerForm.defaultModel">
+                <option value="">{{ t('model.useRequestDefault') }}</option>
+                <option v-for="model in providerModelOptions(providerForm.id || providerForm.editingId)" :key="model" :value="model">{{ model }}</option>
+              </select>
+              <small>{{ t('model.providerHint') }}</small>
+            </div>
+            <div class="form-section">
+              <template v-if="!providerForm.editingId">
+              <strong>{{ t('provider.firstKeyTitle') }}</strong>
+              <small>{{ t('provider.firstKeyCopy') }}</small>
+              </template>
+              <template v-else>
+                <strong>{{ t('action.editProvider') }}</strong>
+                <small>{{ providerForm.baseUrl }}</small>
+              </template>
+            </div>
+            <input v-if="!providerForm.editingId" v-model.trim="providerForm.firstKeyName" :placeholder="t('placeholder.firstKeyName')">
+            <input v-if="!providerForm.editingId" v-model.trim="providerForm.firstKeySecret" type="password" :placeholder="t('placeholder.firstKeySecret')" autocomplete="off">
+            <input v-if="!providerForm.editingId" v-model.number="providerForm.firstKeyPriority" type="number" :placeholder="t('placeholder.keyPriority')">
+            <details class="advanced-field">
+              <summary>{{ t('provider.modelMapTitle') }}</summary>
+              <p>{{ t('provider.modelMapCopy') }}</p>
+              <textarea v-model="providerForm.modelMap" spellcheck="false" :placeholder="t('placeholder.modelMap')"></textarea>
+              <div class="quick-fill">
+                <button class="ghost" type="button" @click="providerForm.modelMap = '{}'">{{ t('action.emptyMap') }}</button>
+                <button class="ghost" type="button" @click="providerForm.modelMap = modelMapExample">{{ t('action.exampleMap') }}</button>
+              </div>
+            </details>
+            <div class="form-actions">
+              <button class="ghost" type="button" data-testid="cancel-provider" @click="cancelProviderForm">{{ t('action.cancel') }}</button>
+              <button type="submit">{{ t(providerForm.editingId ? 'action.updateProvider' : 'action.saveProvider') }}</button>
+            </div>
+          </form>
+          <div class="provider-board">
+            <article v-for="p in providers" :key="p.id" class="provider-card">
+              <div class="provider-card-main">
+                <div>
+                  <div class="provider-title-row">
+                    <code>{{ p.id }}</code>
+                    <span :class="['pill', p.enabled ? 'ok' : 'bad']">{{ p.enabled ? t('status.enabled') : t('status.disabled') }}</span>
+                    <span class="pill">{{ providerTypeLabel(p.type) }}</span>
+                  </div>
+                  <h3>{{ p.name }}</h3>
+                  <small class="provider-endpoint">{{ p.baseUrl }}</small>
+                </div>
+                <div class="provider-actions">
+                  <button type="button" @click="openKeyForm(p)">{{ t('action.addKey') }}</button>
+                  <button class="ghost" type="button" @click="editProvider(p)">{{ t('action.editProvider') }}</button>
+                  <button class="ghost" type="button" @click="toggleProvider(p)">{{ t('action.toggle') }}</button>
+                  <button class="danger" type="button" @click="deleteProvider(p)">{{ t('action.delete') }}</button>
+                </div>
+              </div>
+              <form v-if="providerFormOpen && providerForm.editingId === p.id" class="form-grid inline-edit-form provider-inline-form" data-testid="provider-form" @submit.prevent="saveProvider">
+                <div class="inline-form-heading">
+                  <strong>{{ t('action.editProvider') }}</strong>
+                  <small>{{ p.name }} · {{ p.baseUrl }}</small>
+                </div>
+                <div v-if="formError" class="form-error">{{ formError }}</div>
+                <input v-model.trim="providerForm.id" disabled :placeholder="t('placeholder.providerId')">
+                <input v-model.trim="providerForm.name" :placeholder="t('placeholder.name')">
+                <select v-model="providerForm.type">
+                  <option v-for="type in providerTypes" :key="type.value" :value="type.value">{{ type.label }}</option>
+                </select>
+                <input v-model.trim="providerForm.baseUrl" :placeholder="t('placeholder.baseUrl')">
+                <input v-model.trim="providerForm.balancePath" :placeholder="t('placeholder.balancePath')">
+                <input v-model.number="providerForm.priority" type="number" :placeholder="t('placeholder.priority')">
+                <div class="model-select-field">
+                  <select v-model="providerForm.defaultModel">
+                    <option value="">{{ t('model.useRequestDefault') }}</option>
+                    <option v-for="model in providerModelOptions(providerForm.id || providerForm.editingId)" :key="model" :value="model">{{ model }}</option>
+                  </select>
+                  <small>{{ t('model.providerHint') }}</small>
+                </div>
+                <details class="advanced-field">
+                  <summary>{{ t('provider.modelMapTitle') }}</summary>
+                  <p>{{ t('provider.modelMapCopy') }}</p>
+                  <textarea v-model="providerForm.modelMap" spellcheck="false" :placeholder="t('placeholder.modelMap')"></textarea>
+                  <div class="quick-fill">
+                    <button class="ghost" type="button" @click="providerForm.modelMap = '{}'">{{ t('action.emptyMap') }}</button>
+                    <button class="ghost" type="button" @click="providerForm.modelMap = modelMapExample">{{ t('action.exampleMap') }}</button>
+                  </div>
+                </details>
+                <div class="form-actions">
+                  <button class="ghost" type="button" data-testid="cancel-provider" @click="cancelProviderForm">{{ t('action.cancel') }}</button>
+                  <button type="submit">{{ t('action.updateProvider') }}</button>
+                </div>
+              </form>
+              <div class="provider-meta-grid">
+                <div>
+                  <span>{{ t('table.priority') }}</span>
+                  <strong>{{ p.priority }}</strong>
+                </div>
+                <div>
+                  <span>{{ t('table.keys') }}</span>
+                  <strong>{{ providerKeys(p.id).length }}</strong>
+                </div>
+                <div>
+                  <span>{{ t('model.currentDefault') }}</span>
+                  <strong>{{ modelMapDefault(p.modelMap) || t('model.useRequestDefault') }}</strong>
+                </div>
+                <div>
+                  <span>{{ t('table.balance') }}</span>
+                  <strong :class="providerBalanceClass(p.id)">{{ providerBalanceText(p.id) }}</strong>
+                </div>
+                <div>
+                  <span>{{ t('provider.apiEndpoint') }}</span>
+                  <code>{{ providerApiEndpoint(p) }}</code>
+                </div>
+              </div>
+              <form v-if="keyFormOpen && !keyForm.editingId && keyForm.providerId === p.id" class="form-grid inline-edit-form key-inline-form" data-testid="key-form" @submit.prevent="saveKey">
+                <div class="inline-form-heading">
+                  <strong>{{ t('action.addKey') }}</strong>
+                  <small>{{ p.name }} · {{ p.baseUrl }}</small>
+                </div>
+                <div v-if="formError" class="form-error">{{ formError }}</div>
+                <select v-model="keyForm.providerId" disabled>
+                  <option v-for="provider in providers" :key="provider.id" :value="provider.id">{{ provider.name }} ({{ provider.id }})</option>
+                </select>
+                <input v-model.trim="keyForm.name" :placeholder="t('placeholder.keyName')">
+                <input v-model.trim="keyForm.secret" type="password" :placeholder="t('placeholder.secret')" autocomplete="off">
+                <input v-model.number="keyForm.priority" type="number" :placeholder="t('placeholder.priority')">
+                <div class="model-select-field">
+                  <select v-model="keyForm.defaultModel">
+                    <option value="">{{ t('model.useRequestDefault') }}</option>
+                    <option v-for="model in providerModelOptions(keyForm.providerId)" :key="model" :value="model">{{ model }}</option>
+                  </select>
+                  <small>{{ t('model.keyHint') }}</small>
+                </div>
+                <label class="check"><input v-model="keyForm.enabled" type="checkbox"> {{ t('status.enabled') }}</label>
+                <div class="form-actions">
+                  <button class="ghost" type="button" data-testid="cancel-key" @click="cancelKeyForm">{{ t('action.cancel') }}</button>
+                  <button type="submit">{{ t('action.saveKey') }}</button>
+                </div>
+              </form>
+              <div v-if="providerKeys(p.id).length" class="key-stack">
+                <div v-for="k in providerKeys(p.id)" :key="k.id" class="key-card">
+                  <div class="key-card-main">
+                    <div>
+                      <div class="key-title-row">
+                        <strong class="key-name">{{ k.name || k.id }}</strong>
+                        <span v-if="k.manualPreferred" class="pill ok">{{ t('status.preferred') }}</span>
+                        <span :class="['pill', k.enabled ? 'ok' : 'bad']">{{ k.enabled ? t('status.enabled') : t('status.disabled') }}</span>
+                      </div>
+                      <small>{{ t('provider.keyHealth', { ok: k.successCount || 0, fail: k.failureCount || 0 }) }}</small>
+                    </div>
+                    <code class="key-hint">{{ k.keyHint }}</code>
+                  </div>
+                  <form v-if="keyFormOpen && keyForm.editingId === k.id" class="form-grid inline-edit-form key-inline-form" data-testid="key-form" @submit.prevent="saveKey">
+                    <div class="inline-form-heading">
+                      <strong>{{ t('action.editKey') }}</strong>
+                      <small>{{ p.name }} · {{ k.keyHint }}</small>
+                    </div>
+                    <div v-if="formError" class="form-error">{{ formError }}</div>
+                    <select v-model="keyForm.providerId" disabled>
+                      <option v-for="provider in providers" :key="provider.id" :value="provider.id">{{ provider.name }} ({{ provider.id }})</option>
+                    </select>
+                    <input v-model.trim="keyForm.name" :placeholder="t('placeholder.keyName')">
+                    <input v-model.trim="keyForm.secret" type="password" :placeholder="t('placeholder.secretKeep')" autocomplete="off">
+                    <input v-model.number="keyForm.priority" type="number" :placeholder="t('placeholder.priority')">
+                    <div class="model-select-field">
+                      <select v-model="keyForm.defaultModel">
+                        <option value="">{{ t('model.useRequestDefault') }}</option>
+                        <option v-for="model in providerModelOptions(keyForm.providerId)" :key="model" :value="model">{{ model }}</option>
+                      </select>
+                      <small>{{ t('model.keyHint') }}</small>
+                    </div>
+                    <label class="check"><input v-model="keyForm.enabled" type="checkbox"> {{ t('status.enabled') }}</label>
+                    <div class="form-actions">
+                      <button class="ghost" type="button" data-testid="cancel-key" @click="cancelKeyForm">{{ t('action.cancel') }}</button>
+                      <button type="submit">{{ t('action.updateKey') }}</button>
+                    </div>
+                  </form>
+                  <div class="key-test-row">
+                    <button class="ghost" type="button" @click="testKey(k)" :disabled="testingKeyId === k.id">
+                      {{ testingKeyId === k.id ? t('action.testing') : t('action.test') }}
+                    </button>
+                    <span v-if="keyTestResults[k.id]" :class="['pill', testStatusClass(keyTestResults[k.id])]">{{ testConnectionText(keyTestResults[k.id]) }}</span>
+                    <div v-if="keyTestResults[k.id]" :class="['test-metrics', testStatusClass(keyTestResults[k.id])]">
+                      <span>{{ t('test.http') }} {{ keyTestResults[k.id].statusCode || '-' }}</span>
+                      <span>{{ t('test.latency') }} {{ keyTestResults[k.id].latencyMs || 0 }}ms</span>
+                      <span>{{ t('test.models') }} {{ keyTestResults[k.id].modelCount ?? '-' }}</span>
+                      <span>{{ t('test.tokens') }} {{ tokenUsageText(keyTestResults[k.id]) }}</span>
+                    </div>
+                    <small v-if="testErrorText(keyTestResults[k.id])" class="test-error">{{ testErrorText(keyTestResults[k.id]) }}</small>
+                  </div>
+                  <div class="actions key-actions">
+                    <button class="ghost" type="button" @click="editKey(k)">{{ t('action.editKey') }}</button>
+                    <button class="ghost" type="button" @click="preferKey(k)">{{ t('action.prefer') }}</button>
+                    <button class="ghost" type="button" @click="resetKey(k)">{{ t('action.reset') }}</button>
+                    <button class="ghost" type="button" @click="toggleKey(k)">{{ t('action.toggle') }}</button>
+                    <button class="danger" type="button" @click="deleteKey(k)">{{ t('action.delete') }}</button>
+                  </div>
+                </div>
+              </div>
+              <div v-else class="empty-state compact-empty provider-empty">
+                <strong>{{ t('empty.keys') }}</strong>
+                <small>{{ t('empty.keysHint') }}</small>
+                <button type="button" @click="openKeyForm(p)">{{ t('action.addKey') }}</button>
+              </div>
+            </article>
+            <div v-if="!providers.length" class="empty-state compact-empty">
+              <strong>{{ t('empty.providers') }}</strong>
+              <small>{{ t('empty.providersHint') }}</small>
+              <button type="button" @click="openProviderForm">{{ t('action.addProvider') }}</button>
+            </div>
+          </div>
+          <div class="balance-header">
+            <div>
+              <h2>{{ t('provider.balanceTitle') }}</h2>
+              <small>{{ t('empty.balancesHint') }}</small>
+            </div>
+            <button class="ghost" type="button" @click="refreshBalances" :disabled="balanceRefreshing">{{ balanceRefreshing ? t('action.refreshingBalance') : t('action.refreshBalance') }}</button>
+          </div>
+          <div v-if="balanceResults.length" class="compact-list">
+            <div v-for="result in balanceResults" :key="result.providerId + ':' + result.keyId" class="compact-row">
+              <div>
+                <strong>{{ result.providerId }} {{ result.keyId || '' }}</strong>
+                <small>{{ result.error || result.status }}</small>
+              </div>
+              <span :class="['pill', resultStatusClass(result.status)]">{{ result.status }}</span>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>{{ t('table.provider') }}</th><th>Key</th><th>{{ t('table.balance') }}</th><th>{{ t('table.status') }}</th><th>{{ t('table.error') }}</th><th>{{ t('table.updated') }}</th></tr></thead>
+              <tbody>
+                <tr v-for="b in balances" :key="b.providerId + ':' + b.keyId">
+                  <td>{{ b.providerId }}</td>
+                  <td>{{ b.keyId || '-' }}</td>
+                  <td :class="balanceValueClass(b)">{{ displayBalanceValue(b) }}</td>
+                  <td><span :class="['pill', balanceStatusClass(b)]">{{ balanceStatusText(b.status) }}</span></td>
+                  <td>{{ b.error || '-' }}</td>
+                  <td>{{ formatSingaporeTime(b.refreshedAt || b.updatedAt) }}</td>
+                </tr>
+                <tr v-if="!balances.length">
+                  <td colspan="6">
+                    <div class="empty-state compact-empty">
+                      <strong>{{ t('empty.balances') }}</strong>
+                      <small>{{ t('empty.balancesHint') }}</small>
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </article>
+      </section>
+
+      <section v-show="activeSection === 'keys'" class="section">
+        <article class="panel">
+          <div class="flow-hint">
+            <strong>{{ t('keys.title') }}</strong>
+            <span>{{ t('keys.copy') }}</span>
+          </div>
+          <form class="form-grid gateway-key-form" @submit.prevent="createGatewayKey">
+            <input v-model.trim="gatewayKeyForm.name" :placeholder="t('placeholder.gatewayKeyName')">
+            <div class="form-actions">
+              <button type="submit">{{ t('action.addGatewayKey') }}</button>
+            </div>
+          </form>
+          <div v-if="createdGatewayKey?.plaintext" class="flow-hint">
+            <strong>{{ t(createdGatewayKey.event === 'rotated' ? 'gateway.rotatedTitle' : 'gateway.createdTitle') }}</strong>
+            <span>{{ t(createdGatewayKey.event === 'rotated' ? 'gateway.rotatedCopy' : 'gateway.createdCopy') }}</span>
+            <code class="key-hint">{{ createdGatewayKey.plaintext }}</code>
+            <button
+              type="button"
+              :class="copyButtonClass('createdGatewayKey')"
+              @click="copyText(createdGatewayKey.plaintext, 'createdGatewayKey')"
+            >{{ copyButtonText('createdGatewayKey') }}</button>
+          </div>
+          <div class="flow-hint">
+            <strong>{{ t('gateway.compatTitle') }}</strong>
+            <span>{{ t('gateway.compatCopy') }}</span>
+          </div>
+          <div v-if="!gatewayKeys.length" class="empty-state compact-empty">
+            <strong>{{ t('nav.keys') }}</strong>
+            <small>{{ t('keys.copy') }}</small>
+          </div>
+          <div v-else class="table-wrap">
+            <table>
+              <thead><tr><th>ID</th><th>{{ t('table.name') }}</th><th>Key</th><th>{{ t('table.requests') }}</th><th>{{ t('table.lastUsed') }}</th><th>{{ t('table.status') }}</th><th>{{ t('table.actions') }}</th></tr></thead>
+              <tbody>
+                <tr v-for="k in gatewayKeys" :key="k.id">
+                  <td><code>{{ k.id }}</code></td>
+                  <td>{{ k.name }}</td>
+                  <td><code class="key-hint">{{ k.keyHint }}</code></td>
+                  <td>{{ k.requestCount }}</td>
+                  <td>{{ formatSingaporeTime(k.lastUsedAt) }}</td>
+                  <td>
+                    <span :class="['pill', k.enabled ? 'ok' : 'bad']">{{ k.enabled ? t('status.enabled') : t('status.disabled') }}</span>
+                  </td>
+                  <td class="actions">
+                    <button class="ghost" type="button" @click="toggleGatewayKey(k)">{{ t('action.toggle') }}</button>
+                    <button class="ghost" type="button" @click="rotateGatewayKey(k)">{{ t('action.rotate') }}</button>
+                    <button class="danger" type="button" @click="deleteGatewayKey(k)">{{ t('action.delete') }}</button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </article>
+      </section>
+
+      <section v-show="activeSection === 'routing'" class="section">
+        <article class="panel">
+          <form class="form-grid routing-form" @submit.prevent="saveRouting">
+            <label><span>{{ t('routing.failureThreshold') }}</span><input v-model.number="routing.failureThreshold" type="number" min="1"></label>
+            <label><span>{{ t('routing.cooldownSeconds') }}</span><input v-model.number="routing.cooldownSeconds" type="number" min="0"></label>
+            <label><span>{{ t('routing.authCooldownSeconds') }}</span><input v-model.number="routing.authCooldownSeconds" type="number" min="0"></label>
+            <label><span>{{ t('routing.retryPerRequest') }}</span><input v-model.number="routing.retryPerRequest" type="number" min="1"></label>
+            <label><span>{{ t('routing.timeoutSeconds') }}</span><input v-model.number="routing.timeoutSeconds" type="number" min="1"></label>
+            <label><span>{{ t('routing.streamIdleTimeoutSeconds') }}</span><input v-model.number="routing.streamIdleTimeoutSeconds" type="number" min="1"></label>
+            <label><span>{{ t('routing.maxConcurrentRequests') }}</span><input v-model.number="routing.maxConcurrentRequests" type="number" min="0"></label>
+            <label><span>{{ t('routing.maxConcurrentPerProvider') }}</span><input v-model.number="routing.maxConcurrentPerProvider" type="number" min="0"></label>
+            <label><span>{{ t('routing.maxConcurrentPerKey') }}</span><input v-model.number="routing.maxConcurrentPerKey" type="number" min="0"></label>
+            <label><span>{{ t('routing.queueTimeoutMilliseconds') }}</span><input v-model.number="routing.queueTimeoutMilliseconds" type="number" min="0"></label>
+            <label class="check"><input v-model="routing.streamRetryBeforeFirstByte" type="checkbox"> {{ t('routing.streamRetryBeforeFirstByte') }}</label>
+            <label class="check"><input v-model="routing.retryAmbiguousErrors" type="checkbox"> {{ t('routing.retryAmbiguousErrors') }}</label>
+            <label class="check"><input v-model="routing.allowInsecureUpstreams" type="checkbox"> {{ t('routing.allowInsecureUpstreams') }}</label>
+            <div class="form-actions"><button type="submit">{{ t('action.save') }}</button></div>
+          </form>
+          <div v-if="routingMessage" class="form-success" role="status">{{ routingMessage }}</div>
+          <div class="panel-title maintenance-actions">
+            <h2>{{ t('maintenance.title') }}</h2>
+            <div class="panel-actions">
+              <button class="ghost" type="button" @click="checkIntegrity">{{ t('maintenance.checkIntegrity') }}</button>
+              <button class="ghost" type="button" @click="downloadBackup">{{ t('maintenance.downloadDatabaseBackup') }}</button>
+            </div>
+          </div>
+          <form class="portable-backup-form" @submit.prevent="downloadPortableBackup">
+            <label><span>{{ t('maintenance.passphrase') }}</span><input v-model="backupPassphrase" type="password" minlength="12" autocomplete="new-password" required></label>
+            <label><span>{{ t('maintenance.confirmPassphrase') }}</span><input v-model="backupPassphraseConfirm" type="password" minlength="12" autocomplete="new-password" required></label>
+            <button type="submit">{{ t('maintenance.downloadPortableBackup') }}</button>
+          </form>
+          <div v-if="maintenanceMessage" class="form-success" role="status">{{ maintenanceMessage }}</div>
+        </article>
+      </section>
+
+      <section v-show="activeSection === 'setup'" class="section">
+        <article class="panel">
+          <div class="panel-title section-actions">
+            <button class="ghost" type="button" @click="activeSection = 'providers'">{{ t('action.backProviders') }}</button>
+          </div>
+          <div class="flow-hint">
+            <strong>{{ t('setup.title') }}</strong>
+            <span>{{ t('setup.copy') }}</span>
+          </div>
+          <div class="snippet-grid">
+            <div v-for="(value, name) in snippets" :key="name" class="snippet">
+              <div class="snippet-head">
+                <h3>{{ name }}</h3>
+                <button
+                  class="ghost copy-chip"
+                  type="button"
+                  :class="copyButtonClass(`snippet:${name}`)"
+                  @click="copyText(typeof value === 'string' ? value : pretty(value), `snippet:${name}`)"
+                >{{ copyButtonText(`snippet:${name}`) }}</button>
+              </div>
+              <pre>{{ typeof value === 'string' ? value : pretty(value) }}</pre>
+            </div>
+          </div>
+        </article>
+      </section>
+
+      <section v-show="activeSection === 'logs'" class="section">
+        <article class="panel">
+          <div class="log-toolbar">
+            <input v-model.trim="logFilters.q" :aria-label="t('logs.search')" :placeholder="t('logs.search')" @keyup.enter="loadLogs(0)">
+            <select v-model="logFilters.status" :aria-label="t('table.status')">
+              <option value="">{{ t('logs.allStatus') }}</option>
+              <option value="200">2xx</option><option value="400">400</option><option value="401">401</option><option value="429">429</option><option value="499">499</option><option value="500">500</option><option value="502">502</option><option value="503">503</option>
+            </select>
+            <select v-model="logFilters.providerId" :aria-label="t('table.provider')">
+              <option value="">{{ t('logs.allProviders') }}</option>
+              <option v-for="provider in providers" :key="provider.id" :value="provider.id">{{ provider.name }}</option>
+            </select>
+            <input v-model.trim="logFilters.model" :aria-label="t('table.model')" :placeholder="t('table.model')" @keyup.enter="loadLogs(0)">
+            <button type="button" :disabled="logsLoading" @click="loadLogs(0)">{{ t('logs.apply') }}</button>
+            <button class="ghost" type="button" @click="exportLogs">{{ t('logs.export') }}</button>
+            <button class="danger" type="button" @click="clearLogs">{{ t('logs.clear') }}</button>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>{{ t('table.time') }}</th><th>{{ t('table.protocol') }}</th><th>{{ t('table.model') }}</th><th>{{ t('table.provider') }}</th><th>Key</th><th>{{ t('table.status') }}</th><th>Tokens</th><th>{{ t('table.latency') }}</th><th>{{ t('table.error') }}</th></tr></thead>
+              <tbody>
+                <tr v-for="log in logs" :key="log.id">
+                  <td>{{ formatSingaporeTime(log.createdAt) }}</td>
+                  <td>{{ log.inboundProtocol }}</td>
+                  <td>{{ log.model || '-' }}</td>
+                  <td>{{ log.providerId || '-' }}</td>
+                  <td>{{ log.keyId || '-' }}</td>
+                  <td>{{ log.status }}</td>
+                  <td>{{ log.totalTokens || '-' }}</td>
+                  <td>{{ log.latencyMs }}ms</td>
+                  <td>{{ log.errorType || '-' }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="pagination">
+            <button class="ghost" type="button" :disabled="logPage.offset <= 0 || logsLoading" @click="loadLogs(logPage.offset - logPage.limit)">{{ t('logs.previous') }}</button>
+            <span>{{ logPage.total ? `${logPage.offset + 1}-${Math.min(logPage.offset + logs.length, logPage.total)} / ${logPage.total}` : '0 / 0' }}</span>
+            <button class="ghost" type="button" :disabled="logPage.offset + logPage.limit >= logPage.total || logsLoading" @click="loadLogs(logPage.offset + logPage.limit)">{{ t('logs.next') }}</button>
+          </div>
+        </article>
+      </section>
+    </main>
+  </div>
+  <script src="/admin/assets/vendor/vue.runtime.global.prod.js"></script>
+  <script src="/admin/assets/i18n.js"></script>
+  <script src="/admin/assets/app.js"></script>
+</body>
+</html>

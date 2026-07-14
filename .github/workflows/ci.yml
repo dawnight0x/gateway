@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 1.26.5
+          cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build:admin
+      - run: git diff --exit-code -- web/admin/index.html web/admin/assets/render.js web/admin/assets/vendor/vue.runtime.global.prod.js
+      - run: go mod verify
+      - run: go test ./...
+      - run: go vet ./...
+      - run: go build -o ${{ runner.temp }}/gateway ./cmd/gateway
+      - run: go build -o ${{ runner.temp }}/gateway-backup ./cmd/gateway-backup
+      - if: runner.os == 'Linux'
+        env:
+          CGO_ENABLED: "1"
+        run: go test -race ./...
+      - if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/smoke.ps1 -Port 8787
+
+  vulnerability-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 1.26.5
+          cache: true
+      - run: go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
+      - run: govulncheck ./...

@@ -1,0 +1,86 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: windows
+            goarch: amd64
+            suffix: .exe
+          - goos: linux
+            goarch: amd64
+            suffix: ""
+          - goos: linux
+            goarch: arm64
+            suffix: ""
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 1.26.5
+          cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci && npm run build:admin
+      - run: git diff --exit-code -- web/admin/index.html web/admin/assets/render.js web/admin/assets/vendor/vue.runtime.global.prod.js
+      - name: Build binaries
+        shell: pwsh
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: |
+          $name = "local-ai-gateway-${{ github.ref_name }}-${{ matrix.goos }}-${{ matrix.goarch }}"
+          New-Item -ItemType Directory -Force "stage/$name" | Out-Null
+          go build -trimpath -buildvcs=false -ldflags "-s -w" -o "stage/$name/gateway${{ matrix.suffix }}" ./cmd/gateway
+          go build -trimpath -buildvcs=false -ldflags "-s -w" -o "stage/$name/gateway-backup${{ matrix.suffix }}" ./cmd/gateway-backup
+          Copy-Item README.md,config.example.yaml "stage/$name/"
+          Copy-Item docs "stage/$name/docs" -Recurse
+          ./scripts/generate-sbom.ps1 -OutputPath "stage/$name/sbom.cdx.json"
+          Compress-Archive -Path "stage/$name" -DestinationPath "stage/$name.zip"
+      - uses: actions/attest-build-provenance@v3
+        with:
+          subject-path: stage/*.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: local-ai-gateway-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: stage/*.zip
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: local-ai-gateway-*
+          path: release
+          merge-multiple: true
+      - name: Create checksums
+        shell: pwsh
+        run: |
+          Get-ChildItem release/*.zip | Sort-Object Name | ForEach-Object {
+            $hash = (Get-FileHash -Algorithm SHA256 $_.FullName).Hash.ToLowerInvariant()
+            "$hash  $($_.Name)"
+          } | Set-Content -Encoding ascii release/SHA256SUMS
+      - uses: actions/attest-build-provenance@v3
+        with:
+          subject-path: release/SHA256SUMS
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${{ github.ref_name }}" release/* --generate-notes --verify-tag

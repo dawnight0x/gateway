@@ -1,0 +1,15 @@
+data/
+.env
+config.yaml
+config.local.yaml
+.tools/
+node_modules/
+.agents/
+.gocache/
+.tmp/
+bin/
+*.log
+coverage/
+coverage
+.DS_Store
+Thumbs.db

@@ -1,0 +1,59 @@
+server:
+  host: 127.0.0.1
+  public_host: localhost
+  port: 18787
+  # 默认只允许回环监听。监听局域网/公网地址时必须显式开启，并建议配置 TLS。
+  allow_remote: false
+  # 仅用于受信任的隔离网络；公网暴露不要开启此项。
+  allow_insecure_remote: false
+  tls_cert_file: ""
+  tls_key_file: ""
+  # 可选兼容 Key。留空时不启用固定默认 Key；推荐在“网关 Key”页面创建随机 sk-... Key。
+  proxy_token: ""
+  # 管理后台 Token。首次使用后请立即改成强随机值，或用 GATEWAY_ADMIN_TOKEN 覆盖。
+  # 保持 change-me 或留空时，程序会自动生成强随机 Token 到 data/admin.token。
+  admin_token: change-me
+  open_browser_on_duplicate: true
+  read_timeout_seconds: 30
+  idle_timeout_seconds: 120
+  max_header_bytes: 1048576
+
+routing:
+  failure_threshold: 5
+  cooldown_seconds: 300
+  auth_cooldown_seconds: 86400
+  retry_per_request: 3
+  timeout_seconds: 120
+  # 流式响应允许无限总时长，但连续这么久没有收到任何数据就中止。
+  stream_idle_timeout_seconds: 120
+  stream_retry_before_first_byte: true
+  # 网络错误、5xx、空 2xx 等可能已经在上游执行，默认不跨 Key 重试以避免重复计费。
+  retry_ambiguous_errors: false
+  # 非回环上游默认必须使用 HTTPS。
+  allow_insecure_upstreams: false
+  # 设为 0 可关闭对应并发限制。
+  max_concurrent_requests: 64
+  max_concurrent_per_provider: 16
+  max_concurrent_per_key: 4
+  queue_timeout_milliseconds: 2000
+
+storage:
+  path: data/gateway.db
+  secret_path: data/secret.key
+  admin_path: data/admin.token
+  # 设为 0 可关闭对应限制。默认保留 30 天且最多 100000 条请求日志。
+  log_retention_days: 30
+  log_max_entries: 100000
+  timezone: Asia/Singapore
+  # 数据库升级前创建一致性快照，并在 data/backups 中保留最近 5 份备份。
+  backup_before_migration: true
+  backup_retention: 5
+  # 关闭后不写入请求级日志，指标与服务日志仍保留。
+  request_logging_enabled: true
+
+logging:
+  max_size_mb: 10
+  max_backups: 3
+
+tray:
+  enabled: true

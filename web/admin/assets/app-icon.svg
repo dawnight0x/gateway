@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Local AI Gateway">
+  <rect x="3" y="3" width="58" height="58" rx="11" fill="#315bd6"/>
+  <rect x="4.5" y="4.5" width="55" height="55" rx="9.5" fill="none" stroke="#fff" stroke-opacity=".2" stroke-width="1"/>
+  <path d="M43.4 21.8A16.8 16.8 0 1 0 43.4 42.2" fill="none" stroke="#fff" stroke-width="6.8" stroke-linecap="round"/>
+  <path d="M33.5 32h13.8m-2.5-5.7v5.7" fill="none" stroke="#fff" stroke-width="5.2" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
