@@ -579,12 +579,23 @@ func (s *Store) CreateGatewayKey(ctx context.Context, name string) (model.Gatewa
 		Plaintext: plain,
 	}
 	hash := hashGatewayKey(plain)
-	if _, err := s.db.ExecContext(ctx, `INSERT INTO gateway_keys (id,name,key_hash,key_hint,enabled) VALUES (?,?,?,?,1)`, item.ID, item.Name, hash, item.KeyHint); err != nil {
-		item.ID = slug(fmt.Sprintf("%s-%d", name, time.Now().UnixNano()))
-		_, err = s.db.ExecContext(ctx, `INSERT INTO gateway_keys (id,name,key_hash,key_hint,enabled) VALUES (?,?,?,?,1)`, item.ID, item.Name, hash, item.KeyHint)
-		if err != nil {
-			return model.GatewayKey{}, err
+	base := item.ID
+	var insertErr error
+	for attempt := 0; attempt < 6; attempt++ {
+		if attempt > 0 {
+			suffix, err := randomIDSuffix()
+			if err != nil {
+				return model.GatewayKey{}, err
+			}
+			item.ID = base + "-" + suffix
 		}
+		_, insertErr = s.db.ExecContext(ctx, `INSERT INTO gateway_keys (id,name,key_hash,key_hint,enabled) VALUES (?,?,?,?,1)`, item.ID, item.Name, hash, item.KeyHint)
+		if insertErr == nil {
+			break
+		}
+	}
+	if insertErr != nil {
+		return model.GatewayKey{}, insertErr
 	}
 	s.clearGatewayKeyCache()
 	row := s.db.QueryRowContext(ctx, `SELECT id,name,key_hint,enabled,request_count,last_used_at,created_at,updated_at FROM gateway_keys WHERE id=?`, item.ID)
@@ -1506,6 +1517,14 @@ func randomGatewayKey() (string, error) {
 		return "", err
 	}
 	return "sk-" + base64.RawURLEncoding.EncodeToString(b), nil
+}
+
+func randomIDSuffix() (string, error) {
+	var b [5]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b[:]), nil
 }
 
 func hashGatewayKey(plain string) string {

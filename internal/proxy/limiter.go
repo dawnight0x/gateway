@@ -6,10 +6,10 @@ import (
 )
 
 type requestLimiter struct {
-	global  chan struct{}
-	changed chan struct{}
+	global chan struct{}
 
 	mu        sync.Mutex
+	changed   chan struct{}
 	providers map[string]chan struct{}
 	keys      map[string]chan struct{}
 	providerN int
@@ -19,7 +19,7 @@ type requestLimiter struct {
 func newRequestLimiter(global, provider, key int) *requestLimiter {
 	return &requestLimiter{
 		global:    makeLimit(global),
-		changed:   make(chan struct{}, 1),
+		changed:   make(chan struct{}),
 		providers: make(map[string]chan struct{}),
 		keys:      make(map[string]chan struct{}),
 		providerN: provider,
@@ -29,10 +29,13 @@ func newRequestLimiter(global, provider, key int) *requestLimiter {
 
 func (l *requestLimiter) acquire(ctx context.Context, providerID, keyID string) (func(), bool) {
 	for {
+		// Capture the change signal before attempting acquisition so a release that
+		// races between a failed tryAcquire and the wait below is not lost.
+		signal := l.changeSignal()
 		if release, ok := l.tryAcquire(providerID, keyID); ok {
 			return release, true
 		}
-		if !l.wait(ctx) {
+		if !l.wait(ctx, signal) {
 			return func() {}, false
 		}
 	}
@@ -61,20 +64,31 @@ func (l *requestLimiter) tryAcquire(providerID, keyID string) (func(), bool) {
 	}, true
 }
 
-func (l *requestLimiter) wait(ctx context.Context) bool {
+// changeSignal returns the current broadcast channel. Callers should capture it before a
+// tryAcquire attempt so a concurrent release cannot be missed between the failed attempt and wait.
+func (l *requestLimiter) changeSignal() <-chan struct{} {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.changed
+}
+
+func (l *requestLimiter) wait(ctx context.Context, signal <-chan struct{}) bool {
 	select {
-	case <-l.changed:
+	case <-signal:
 		return true
 	case <-ctx.Done():
 		return false
 	}
 }
 
+// signalChanged wakes every waiter so they can all re-attempt acquisition. Closing and
+// replacing the channel broadcasts to all current waiters, avoiding the starvation that a
+// single-slot signal caused when a woken waiter lost the freed slot to a racing tryAcquire.
 func (l *requestLimiter) signalChanged() {
-	select {
-	case l.changed <- struct{}{}:
-	default:
-	}
+	l.mu.Lock()
+	close(l.changed)
+	l.changed = make(chan struct{})
+	l.mu.Unlock()
 }
 
 func (l *requestLimiter) provider(id string) chan struct{} {
