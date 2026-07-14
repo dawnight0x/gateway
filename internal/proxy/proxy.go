@@ -42,6 +42,9 @@ type Service struct {
 	retryAttempts    atomic.Uint64
 	rejectedRequests atomic.Uint64
 
+	// errorCounts is keyed by errType passed to log(). Keys MUST come from a bounded
+	// enumeration (router.Classify output plus a few literals like "gateway_busy") and
+	// never from client-controlled input, or this map would grow without bound.
 	errorCountsMu sync.Mutex
 	errorCounts   map[string]uint64
 }

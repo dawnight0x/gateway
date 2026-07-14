@@ -21,7 +21,8 @@ import (
 
 	"local-ai-gateway/internal/model"
 
-	_ "modernc.org/sqlite"
+	sqlite "modernc.org/sqlite"
+	sqlite3 "modernc.org/sqlite/lib"
 )
 
 type Store struct {
@@ -592,6 +593,11 @@ func (s *Store) CreateGatewayKey(ctx context.Context, name string) (model.Gatewa
 		_, insertErr = s.db.ExecContext(ctx, `INSERT INTO gateway_keys (id,name,key_hash,key_hint,enabled) VALUES (?,?,?,?,1)`, item.ID, item.Name, hash, item.KeyHint)
 		if insertErr == nil {
 			break
+		}
+		// Only an ID collision is worth retrying with a fresh suffix; any other
+		// error (disk full, closed connection) is real and should surface at once.
+		if !isConstraintViolation(insertErr) {
+			return model.GatewayKey{}, insertErr
 		}
 	}
 	if insertErr != nil {
@@ -1525,6 +1531,17 @@ func randomIDSuffix() (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(b[:]), nil
+}
+
+// isConstraintViolation reports whether err is a SQLite constraint failure (e.g. a
+// primary-key or UNIQUE collision). The low byte of every SQLITE_CONSTRAINT_* extended
+// code is SQLITE_CONSTRAINT, so masking to the primary result code covers all variants.
+func isConstraintViolation(err error) bool {
+	var sqliteErr *sqlite.Error
+	if !errors.As(err, &sqliteErr) {
+		return false
+	}
+	return sqliteErr.Code()&0xff == sqlite3.SQLITE_CONSTRAINT
 }
 
 func hashGatewayKey(plain string) string {
