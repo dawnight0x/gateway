@@ -2,6 +2,19 @@
 
 Local AI Gateway 是一个本地 AI API 网关，管理后台已经内嵌在程序中，无需安装 Node.js、Go 或其他运行环境。
 
+## 系统要求
+
+- Windows 10/11 x64
+- Linux amd64 或 arm64
+
+## 包内容
+
+- `gateway` / `gateway.exe`：网关主程序
+- `gateway-backup` / `gateway-backup.exe`：离线恢复与主密钥轮换工具
+- `config.example.yaml`：可选配置模板；不创建 `config.yaml` 也可使用安全默认值启动
+- `docs/`：Linux 部署、运维和协议兼容说明
+- `VERSION.json`、`SOURCE-MANIFEST.txt`、`sbom.cdx.json`、`SHA256SUMS`：版本、来源和完整性信息
+
 ## Windows
 
 双击 `gateway.exe` 启动。程序会显示在系统托盘中，可通过托盘菜单打开管理后台或退出程序。

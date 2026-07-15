@@ -22,26 +22,12 @@ try {
   $candidateCommit = (& git -C $Root rev-parse --verify HEAD 2>$null).Trim()
   if ($LASTEXITCODE -eq 0 -and $candidateCommit) {
     $Commit = $candidateCommit
-	$worktreeChanges = @(& git -C $Root status --porcelain=v1 --untracked-files=normal)
-	if ($worktreeChanges.Count -gt 0) {
-		$Commit += "-dirty"
-	}
+    $worktreeChanges = @(& git -C $Root status --porcelain=v1 --untracked-files=normal)
+    if ($worktreeChanges.Count -gt 0) {
+      $Commit += "-dirty"
+    }
   }
 } catch {}
-$SourceManifestLines = @()
-try {
-	$sourcePaths = @(& git -C $Root ls-files --cached --others --exclude-standard) | Sort-Object
-	foreach ($relative in $sourcePaths) {
-		$sourcePath = Join-Path $Root $relative
-		if (Test-Path -LiteralPath $sourcePath -PathType Leaf) {
-			$hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $sourcePath).Hash.ToLowerInvariant()
-			$SourceManifestLines += "$hash  $($relative.Replace('\', '/'))"
-		}
-	}
-} catch {}
-$sourceManifestText = ($SourceManifestLines -join "`n") + "`n"
-$sourceDigestBytes = [System.Security.Cryptography.SHA256]::HashData([System.Text.Encoding]::UTF8.GetBytes($sourceManifestText))
-$SourceDigest = [Convert]::ToHexString($sourceDigestBytes).ToLowerInvariant()
 $LdVersion = $Version.Replace("'", "")
 $LdCommit = $Commit.Replace("'", "")
 $LdBuiltAt = $BuiltAt.Replace("'", "")
@@ -80,36 +66,6 @@ function Invoke-GoBuild([string]$GOOS, [string]$GOARCH, [string]$Package, [strin
   }
 }
 
-function Copy-PackageReadme([string]$Destination) {
-  Copy-Item -LiteralPath (Join-Path $Root "docs\README-distribution.md") -Destination (Join-Path $Destination "README.md")
-	Copy-Item -LiteralPath (Join-Path $Root "config.example.yaml") -Destination (Join-Path $Destination "config.example.yaml")
-	$DocsDestination = Join-Path $Destination "docs"
-	New-Item -ItemType Directory -Force -Path $DocsDestination | Out-Null
-	foreach ($doc in @("linux.md", "operations.md", "protocol-compatibility.md")) {
-		Copy-Item -LiteralPath (Join-Path $Root "docs\$doc") -Destination (Join-Path $DocsDestination $doc)
-	}
-}
-
-function Write-PackageMetadata([string]$Destination, [string]$Platform) {
-	$metadata = [ordered]@{
-		name = "local-ai-gateway"
-		version = $Version
-		commit = $Commit
-		builtAt = $BuiltAt
-		platform = $Platform
-		defaultPort = 18787
-		sourceSha256 = $SourceDigest
-	}
-	$metadata | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $Destination "VERSION.json") -Encoding utf8
-	$SourceManifestLines | Set-Content -LiteralPath (Join-Path $Destination "SOURCE-MANIFEST.txt") -Encoding ascii
-	$lines = Get-ChildItem -LiteralPath $Destination -File -Recurse | Where-Object { $_.Name -ne "SHA256SUMS" } | Sort-Object FullName | ForEach-Object {
-		$hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $_.FullName).Hash.ToLowerInvariant()
-		$relative = [System.IO.Path]::GetRelativePath($Destination, $_.FullName).Replace('\', '/')
-		"$hash  $relative"
-	}
-	$lines | Set-Content -LiteralPath (Join-Path $Destination "SHA256SUMS") -Encoding ascii
-}
-
 try {
   Push-Location $Root
   try {
@@ -122,23 +78,13 @@ try {
       throw "Go tests failed"
     }
 
-		Invoke-GoBuild "windows" "amd64" ".\cmd\gateway" (Join-Path $WinStage "gateway.exe") "$CommonLdFlags -H=windowsgui"
-		Invoke-GoBuild "windows" "amd64" ".\cmd\gateway-backup" (Join-Path $WinStage "gateway-backup.exe") $CommonLdFlags
-		Invoke-GoBuild "linux" "amd64" ".\cmd\gateway" (Join-Path $LinuxStage "gateway") $CommonLdFlags
-		Invoke-GoBuild "linux" "amd64" ".\cmd\gateway-backup" (Join-Path $LinuxStage "gateway-backup") $CommonLdFlags
+    Invoke-GoBuild "windows" "amd64" ".\cmd\gateway" (Join-Path $WinStage "gateway.exe") "$CommonLdFlags -H=windowsgui"
+    Invoke-GoBuild "windows" "amd64" ".\cmd\gateway-backup" (Join-Path $WinStage "gateway-backup.exe") $CommonLdFlags
+    Invoke-GoBuild "linux" "amd64" ".\cmd\gateway" (Join-Path $LinuxStage "gateway") $CommonLdFlags
+    Invoke-GoBuild "linux" "amd64" ".\cmd\gateway-backup" (Join-Path $LinuxStage "gateway-backup") $CommonLdFlags
 
-		Copy-PackageReadme $WinStage
-		Copy-PackageReadme $LinuxStage
-		$previousRefName = $env:GITHUB_REF_NAME
-		try {
-			$env:GITHUB_REF_NAME = $Version
-			& (Join-Path $Root "scripts\generate-sbom.ps1") -OutputPath (Join-Path $WinStage "sbom.cdx.json")
-			Copy-Item -LiteralPath (Join-Path $WinStage "sbom.cdx.json") -Destination (Join-Path $LinuxStage "sbom.cdx.json")
-		} finally {
-			$env:GITHUB_REF_NAME = $previousRefName
-		}
-		Write-PackageMetadata $WinStage "windows/amd64"
-		Write-PackageMetadata $LinuxStage "linux/amd64"
+    & (Join-Path $Root "scripts\stage-release-package.ps1") -Destination $WinStage -Version $Version -Commit $Commit -BuiltAt $BuiltAt -Platform "windows/amd64"
+    & (Join-Path $Root "scripts\stage-release-package.ps1") -Destination $LinuxStage -Version $Version -Commit $Commit -BuiltAt $BuiltAt -Platform "linux/amd64"
   } finally {
     Pop-Location
   }
