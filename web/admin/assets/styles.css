@@ -1208,6 +1208,53 @@ h3 {
   margin-bottom: 4px;
 }
 
+.balance-result-list {
+  margin-bottom: 14px;
+}
+
+.entity-label {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.entity-label strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.entity-id {
+  display: block;
+  max-width: 280px;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  background: transparent;
+  color: var(--ink-subtle);
+  font-family: "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 10px;
+  line-height: 1.45;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.entity-label small.entity-id {
+  margin: 0;
+}
+
+.key-edit-context {
+  font-family: "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
+}
+
+.balance-table-wrap td:first-child,
+.balance-table-wrap td:nth-child(2) {
+  width: 20%;
+  max-width: 260px;
+}
+
 .flow-hint {
   display: grid;
   min-width: 0;

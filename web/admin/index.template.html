@@ -280,7 +280,7 @@
                 <select v-model="keyForm.providerId" disabled>
                   <option v-for="provider in providers" :key="provider.id" :value="provider.id">{{ provider.name }} ({{ provider.id }})</option>
                 </select>
-                <input v-model.trim="keyForm.name" :placeholder="t('placeholder.keyName')">
+                <input v-model.trim="keyForm.name" :placeholder="t('placeholder.keyDisplayName')">
                 <input v-model.trim="keyForm.secret" type="password" :placeholder="t('placeholder.secret')" autocomplete="off">
                 <input v-model.number="keyForm.priority" type="number" :placeholder="t('placeholder.priority')">
                 <div class="model-select-field">
@@ -312,13 +312,13 @@
                   <form v-if="keyFormOpen && keyForm.editingId === k.id" class="form-grid inline-edit-form key-inline-form" data-testid="key-form" @submit.prevent="saveKey">
                     <div class="inline-form-heading">
                       <strong>{{ t('action.editKey') }}</strong>
-                      <small>{{ p.name }} · {{ k.keyHint }}</small>
+                      <small class="key-edit-context" :title="k.id">{{ p.name }} · {{ t('table.internalId') }}: {{ k.id }}</small>
                     </div>
                     <div v-if="formError" class="form-error">{{ formError }}</div>
                     <select v-model="keyForm.providerId" disabled>
                       <option v-for="provider in providers" :key="provider.id" :value="provider.id">{{ provider.name }} ({{ provider.id }})</option>
                     </select>
-                    <input v-model.trim="keyForm.name" :placeholder="t('placeholder.keyName')">
+                    <input v-model.trim="keyForm.name" :placeholder="t('placeholder.keyDisplayName')">
                     <input v-model.trim="keyForm.secret" type="password" :placeholder="t('placeholder.secretKeep')" autocomplete="off">
                     <input v-model.number="keyForm.priority" type="number" :placeholder="t('placeholder.priority')">
                     <div class="model-select-field">
@@ -375,22 +375,35 @@
             </div>
             <button class="ghost" type="button" @click="refreshBalances" :disabled="balanceRefreshing">{{ balanceRefreshing ? t('action.refreshingBalance') : t('action.refreshBalance') }}</button>
           </div>
-          <div v-if="balanceResults.length" class="compact-list">
+          <div v-if="balanceResults.length" class="compact-list balance-result-list">
             <div v-for="result in balanceResults" :key="result.providerId + ':' + result.keyId" class="compact-row">
-              <div>
-                <strong>{{ result.providerId }} {{ result.keyId || '' }}</strong>
+              <div class="entity-label">
+                <strong>{{ providerDisplayName(result.providerId) }} · {{ keyDisplayName(result.keyId) }}</strong>
+                <small v-if="hasDistinctProviderName(result.providerId) || hasDistinctKeyName(result.keyId)" class="entity-id" :title="`${result.providerId} · ${result.keyId || '-'}`">
+                  {{ result.providerId }} · {{ result.keyId || '-' }}
+                </small>
                 <small>{{ result.error || result.status }}</small>
               </div>
               <span :class="['pill', resultStatusClass(result.status)]">{{ result.status }}</span>
             </div>
           </div>
-          <div class="table-wrap">
+          <div class="table-wrap balance-table-wrap">
             <table>
-              <thead><tr><th>{{ t('table.provider') }}</th><th>Key</th><th>{{ t('table.balance') }}</th><th>{{ t('table.status') }}</th><th>{{ t('table.error') }}</th><th>{{ t('table.updated') }}</th></tr></thead>
+              <thead><tr><th>{{ t('table.provider') }}</th><th>{{ t('table.key') }}</th><th>{{ t('table.balance') }}</th><th>{{ t('table.status') }}</th><th>{{ t('table.error') }}</th><th>{{ t('table.updated') }}</th></tr></thead>
               <tbody>
                 <tr v-for="b in balances" :key="b.providerId + ':' + b.keyId">
-                  <td>{{ b.providerId }}</td>
-                  <td>{{ b.keyId || '-' }}</td>
+                  <td>
+                    <div class="entity-label">
+                      <strong>{{ providerDisplayName(b.providerId) }}</strong>
+                      <code v-if="hasDistinctProviderName(b.providerId)" class="entity-id" :title="b.providerId">{{ b.providerId }}</code>
+                    </div>
+                  </td>
+                  <td>
+                    <div class="entity-label">
+                      <strong>{{ keyDisplayName(b.keyId) }}</strong>
+                      <code v-if="hasDistinctKeyName(b.keyId)" class="entity-id" :title="b.keyId">{{ b.keyId }}</code>
+                    </div>
+                  </td>
                   <td :class="balanceValueClass(b)">{{ displayBalanceValue(b) }}</td>
                   <td><span :class="['pill', balanceStatusClass(b)]">{{ balanceStatusText(b.status) }}</span></td>
                   <td>{{ b.error || '-' }}</td>

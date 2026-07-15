@@ -415,6 +415,26 @@ createApp({
 
     const providerKeys = (providerId) => keys.value.filter((k) => k.providerId === providerId);
 
+    const providerDisplayName = (providerId) => {
+      const provider = providers.value.find((item) => item.id === providerId);
+      return provider?.name || providerId || '-';
+    };
+
+    const keyDisplayName = (keyId) => {
+      const key = keys.value.find((item) => item.id === keyId);
+      return key?.name || keyId || '-';
+    };
+
+    const hasDistinctProviderName = (providerId) => {
+      const name = providerDisplayName(providerId);
+      return !!providerId && name !== providerId;
+    };
+
+    const hasDistinctKeyName = (keyId) => {
+      const name = keyDisplayName(keyId);
+      return !!keyId && name !== keyId;
+    };
+
     const providerApiEndpoint = (provider) => {
       const base = (provider?.baseUrl || '').replace(/\/+$/, '');
       if (!base) return '-';
@@ -966,6 +986,10 @@ createApp({
       pretty,
       providerKeyHints,
       providerKeys,
+      providerDisplayName,
+      keyDisplayName,
+      hasDistinctProviderName,
+      hasDistinctKeyName,
       providerModelOptions,
       providerTypeLabel,
       modelMapDefault,
