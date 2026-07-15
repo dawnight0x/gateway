@@ -37,6 +37,27 @@ jobs:
           cache: npm
       - run: npm ci && npm run build:admin
       - run: git diff --exit-code -- web/admin/index.html web/admin/assets/render.js web/admin/assets/vendor/vue.runtime.global.prod.js
+      - name: Stamp Windows version resource
+        if: matrix.goos == 'windows'
+        shell: pwsh
+        run: |
+          # goversioninfo is pure Go and emits a windows .syso from this linux
+          # host as long as GOOS is not overridden. Reuses the committed icon
+          # and manifest; stamps the numeric FixedFileInfo from the release tag
+          # so Explorer's file-version column matches the release.
+          $nums = [regex]::Matches("${{ github.ref_name }}", '\d+') | ForEach-Object { [int]$_.Value }
+          $maj = if ($nums.Count -ge 1) { $nums[0] } else { 0 }
+          $min = if ($nums.Count -ge 2) { $nums[1] } else { 0 }
+          $pat = if ($nums.Count -ge 3) { $nums[2] } else { 0 }
+          $bld = if ($nums.Count -ge 4) { $nums[3] } else { 0 }
+          go run github.com/josephspurrier/goversioninfo/cmd/goversioninfo@v1.5.0 `
+            -64 `
+            -o cmd/gateway/rsrc_windows_amd64.syso `
+            -icon cmd/gateway/app.ico `
+            -manifest cmd/gateway/app.manifest `
+            -ver-major $maj -ver-minor $min -ver-patch $pat -ver-build $bld `
+            -product-version "${{ github.ref_name }}" `
+            cmd/gateway/versioninfo.json
       - name: Build binaries
         shell: pwsh
         env:
@@ -46,19 +67,44 @@ jobs:
         run: |
           $name = "local-ai-gateway-${{ github.ref_name }}-${{ matrix.goos }}-${{ matrix.goarch }}"
           New-Item -ItemType Directory -Force "stage/$name" | Out-Null
-          go build -trimpath -buildvcs=false -ldflags "-s -w" -o "stage/$name/gateway${{ matrix.suffix }}" ./cmd/gateway
-          go build -trimpath -buildvcs=false -ldflags "-s -w" -o "stage/$name/gateway-backup${{ matrix.suffix }}" ./cmd/gateway-backup
-          Copy-Item README.md,config.example.yaml "stage/$name/"
-          Copy-Item docs "stage/$name/docs" -Recurse
-          ./scripts/generate-sbom.ps1 -OutputPath "stage/$name/sbom.cdx.json"
-          Compress-Archive -Path "stage/$name" -DestinationPath "stage/$name.zip"
+          $builtAt = [DateTime]::UtcNow.ToString("o")
+          $ld = "-s -w " +
+            "-X local-ai-gateway/internal/buildinfo.Version=${{ github.ref_name }} " +
+            "-X local-ai-gateway/internal/buildinfo.Commit=${{ github.sha }} " +
+            "-X local-ai-gateway/internal/buildinfo.BuiltAt=$builtAt"
+          # gateway is the tray app: -H=windowsgui suppresses the console window
+          # on Windows. gateway-backup stays a console tool on every platform.
+          $gatewayLd = $ld
+          if ("${{ matrix.goos }}" -eq "windows") {
+            $gatewayLd = "$ld -H=windowsgui"
+          }
+          go build -trimpath -buildvcs=false -ldflags $gatewayLd -o "stage/$name/gateway${{ matrix.suffix }}" ./cmd/gateway
+          go build -trimpath -buildvcs=false -ldflags $ld -o "stage/$name/gateway-backup${{ matrix.suffix }}" ./cmd/gateway-backup
+          ./scripts/stage-release-package.ps1 `
+            -Destination "stage/$name" `
+            -Version "${{ github.ref_name }}" `
+            -Commit "${{ github.sha }}" `
+            -BuiltAt $builtAt `
+            -Platform "${{ matrix.goos }}/${{ matrix.goarch }}"
+          if ("${{ matrix.goos }}" -eq "windows") {
+            Compress-Archive -LiteralPath "stage/$name" -DestinationPath "stage/$name.zip" -CompressionLevel Optimal
+          } else {
+            tar -czf "stage/$name.tar.gz" -C stage $name
+            if ($LASTEXITCODE -ne 0) {
+              throw "tar archive creation failed with exit code $LASTEXITCODE"
+            }
+          }
       - uses: actions/attest-build-provenance@v3
         with:
-          subject-path: stage/*.zip
+          subject-path: |
+            stage/*.zip
+            stage/*.tar.gz
       - uses: actions/upload-artifact@v4
         with:
           name: local-ai-gateway-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: stage/*.zip
+          path: |
+            stage/*.zip
+            stage/*.tar.gz
           if-no-files-found: error
 
   publish:
@@ -74,7 +120,7 @@ jobs:
       - name: Create checksums
         shell: pwsh
         run: |
-          Get-ChildItem release/*.zip | Sort-Object Name | ForEach-Object {
+          Get-ChildItem release -File | Where-Object { $_.Name -match '\.(zip|tar\.gz)$' } | Sort-Object Name | ForEach-Object {
             $hash = (Get-FileHash -Algorithm SHA256 $_.FullName).Hash.ToLowerInvariant()
             "$hash  $($_.Name)"
           } | Set-Content -Encoding ascii release/SHA256SUMS

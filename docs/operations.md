@@ -16,12 +16,20 @@
 
 ## 离线恢复
 
-恢复时必须先停止网关，避免覆盖正在使用的 SQLite 文件。构建恢复工具：
+恢复时必须先停止网关，避免覆盖正在使用的 SQLite 文件。发行包已经包含恢复工具。
+
+Windows：
 
 ```powershell
-.\.tools\go\bin\go.exe build -buildvcs=false -o .\bin\gateway-backup.exe .\cmd\gateway-backup
 $env:GATEWAY_BACKUP_PASSPHRASE = "your-backup-passphrase"
-.\bin\gateway-backup.exe restore --input .\gateway-portable-xxxx.zip --database .\data\gateway.db --secret .\data\secret.key
+.\gateway-backup.exe restore --input .\gateway-portable-xxxx.zip --database .\data\gateway.db --secret .\data\secret.key
+```
+
+Linux：
+
+```bash
+export GATEWAY_BACKUP_PASSPHRASE='your-backup-passphrase'
+./gateway-backup restore --input ./gateway-portable-xxxx.zip --database ./data/gateway.db --secret ./data/secret.key
 ```
 
 目标文件已存在时命令默认拒绝执行。确认网关已停止后使用 `--force`，工具会先生成带 `before-restore` 时间戳的旧文件副本，再写入恢复内容。数据库与主密钥通过恢复事务日志提交；进程或系统在双文件替换期间中断时，网关下次启动会先自动回滚未完成的恢复。恢复后执行管理后台完整性检查与上游 Key 测试。
@@ -31,7 +39,7 @@ $env:GATEWAY_BACKUP_PASSPHRASE = "your-backup-passphrase"
 轮换必须离线进行。命令会先创建 `pre-key-rotation` 数据库快照，再在单个事务内重加密所有上游 Key，并在主密钥文件中保留上一把密钥作为崩溃恢复和旧快照回退用途：
 
 ```powershell
-.\bin\gateway-backup.exe rotate-key --database .\data\gateway.db --secret .\data\secret.key
+.\gateway-backup.exe rotate-key --database .\data\gateway.db --secret .\data\secret.key
 ```
 
 使用外部 `GATEWAY_MASTER_KEY` 时该命令会拒绝执行。外部密钥轮换需要由密钥管理系统提供旧、新密钥并安排离线迁移。

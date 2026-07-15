@@ -13,6 +13,7 @@ import (
 
 	"local-ai-gateway/internal/model"
 	"local-ai-gateway/internal/protocol"
+	"local-ai-gateway/internal/redact"
 	"local-ai-gateway/internal/upstreamhttp"
 )
 
@@ -450,9 +451,5 @@ func trimModelList(models []string, limit int) []string {
 }
 
 func redactSecret(message, secret string) string {
-	secret = strings.TrimSpace(secret)
-	if secret == "" {
-		return message
-	}
-	return strings.ReplaceAll(message, secret, "***")
+	return redact.Secret(message, secret)
 }

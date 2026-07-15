@@ -16,6 +16,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -23,6 +24,7 @@ import (
 	"local-ai-gateway/internal/config"
 	"local-ai-gateway/internal/model"
 	"local-ai-gateway/internal/protocol"
+	"local-ai-gateway/internal/redact"
 	"local-ai-gateway/internal/router"
 	"local-ai-gateway/internal/store"
 	"local-ai-gateway/internal/upstreamhttp"
@@ -39,6 +41,12 @@ type Service struct {
 	upstreamAttempts atomic.Uint64
 	retryAttempts    atomic.Uint64
 	rejectedRequests atomic.Uint64
+
+	// errorCounts is keyed by errType passed to log(). Keys MUST come from a bounded
+	// enumeration (router.Classify output plus a few literals like "gateway_busy") and
+	// never from client-controlled input, or this map would grow without bound.
+	errorCountsMu sync.Mutex
+	errorCounts   map[string]uint64
 }
 
 const (
@@ -71,6 +79,8 @@ func New(st *store.Store, rt *router.Router, cfg config.Config) *Service {
 		cfg:    cfg,
 		client: upstreamhttp.New(time.Duration(cfg.Routing.TimeoutSeconds)*time.Second, 0, maxConns),
 		limits: newRequestLimiter(cfg.Routing.MaxConcurrentRequests, cfg.Routing.MaxConcurrentPerProvider, cfg.Routing.MaxConcurrentPerKey),
+
+		errorCounts: make(map[string]uint64),
 	}
 }
 
@@ -186,8 +196,8 @@ func (s *Service) proxy(w http.ResponseWriter, r *http.Request) {
 				writeJSON(w, http.StatusConflict, map[string]any{"error": map[string]any{"message": "Responses resources belong to different upstream keys", "type": "affinity_conflict"}})
 				return
 			}
-			copy := matched
-			affinity = &copy
+			matchedCopy := matched
+			affinity = &matchedCopy
 		}
 		if affinity != nil {
 			affinityResolved = true
@@ -228,12 +238,24 @@ func (s *Service) proxy(w http.ResponseWriter, r *http.Request) {
 		queueCtx, queueCancel = context.WithTimeout(r.Context(), time.Duration(s.cfg.Routing.QueueTimeoutMilliseconds)*time.Millisecond)
 	}
 	defer queueCancel()
+	pr := proxyRequest{
+		body:            body,
+		inbound:         inbound,
+		pathModel:       pathModel,
+		modelName:       modelName,
+		requestedStream: requestedStream,
+		statefulRequest: statefulRequest,
+		resourceRefs:    resourceRefs,
+	}
 	attempted := 0
 	busy := false
 	var last attemptResult
 	var lastProviderID, lastKeyID string
 	remaining := append([]model.Key(nil), candidates...)
 	for len(remaining) > 0 && attempted < maxAttempts {
+		// Capture the change signal before the acquisition sweep so a release racing
+		// between a failed tryAcquire and the wait below cannot be missed.
+		signal := s.limits.changeSignal()
 		selected := -1
 		var releaseCapacity func()
 		for index, candidate := range remaining {
@@ -245,7 +267,7 @@ func (s *Service) proxy(w http.ResponseWriter, r *http.Request) {
 		}
 		if selected < 0 {
 			busy = true
-			if !s.limits.wait(queueCtx) {
+			if !s.limits.wait(queueCtx, signal) {
 				break
 			}
 			continue
@@ -258,85 +280,13 @@ func (s *Service) proxy(w http.ResponseWriter, r *http.Request) {
 			busy = true
 			continue
 		}
-		s.inFlight.Add(1)
 		attempted++
-		s.upstreamAttempts.Add(1)
-		if attempted > 1 {
-			s.retryAttempts.Add(1)
-		}
 		lastProviderID, lastKeyID = key.ProviderID, key.ID
-		native := router.ChooseUpstreamProtocol(inbound, key)
-		protocols := []string{native}
-		if !statefulRequest {
-			if fallback := openAIFallbackProtocol(r.URL.Path, inbound, native); fallback != "" {
-				protocols = append(protocols, fallback)
-			}
-		}
-		var result attemptResult
-		for protocolIndex, upstream := range protocols {
-			if protocolIndex > 0 {
-				s.upstreamAttempts.Add(1)
-				s.retryAttempts.Add(1)
-			}
-			converted, convertErr := protocol.ConvertRequest(body, inbound, upstream, key.UpstreamModel, pathModel)
-			if convertErr != nil {
-				result = attemptResult{status: http.StatusBadRequest, errorType: "protocol_error", message: convertErr.Error()}
-				break
-			}
-			if requestedStream {
-				converted, convertErr = protocol.EnableStreaming(converted, upstream)
-				if convertErr != nil {
-					result = attemptResult{status: http.StatusBadRequest, errorType: "protocol_error", message: convertErr.Error()}
-					break
-				}
-			}
-			target := upstreamURL(key.ProviderBaseURL, protocol.UpstreamPath(r.URL.Path, upstream, key.UpstreamModel, converted.Stream))
-			if upstream == router.ProtocolGemini && converted.Stream {
-				target = withQuery(target, "alt", "sse")
-			}
-			result = s.forward(w, r, target, key, inbound, upstream, requestID, converted)
-			if !result.ok && r.Context().Err() != nil {
-				result = clientCanceledResult(result)
-			}
-			if result.ok {
-				if inbound == router.ProtocolOpenAIResponses {
-					ids := append(append([]string(nil), resourceRefs...), result.responseResourceIDs...)
-					if err := s.store.PutUpstreamAffinity(r.Context(), ids, key.ProviderID, key.ID); err != nil {
-						slog.Warn("record upstream resource affinity failed", "key_id", key.ID, "error", err)
-					}
-				}
-				if err := s.router.RecordSuccess(r.Context(), key); err != nil {
-					slog.Warn("record upstream success failed", "key_id", key.ID, "error", err)
-				}
-				s.inFlight.Add(-1)
-				releaseCapacity()
-				releaseProbe()
-				s.log(r.Context(), requestID, inbound, key.ProviderID, key.ID, modelName, result.status, start, result.usage, "")
-				return
-			}
-			if protocolIndex == 0 && result.endpointUnsupported && len(protocols) > 1 {
-				continue
-			}
-			break
-		}
-		last = result
-		if router.CountsAgainstKeyHealth(result.errorType) {
-			if err := s.router.RecordFailure(r.Context(), key, router.Failure{
-				Status:            result.status,
-				ErrorType:         result.errorType,
-				Message:           result.message,
-				RetryAfterSeconds: result.retryAfterSeconds,
-			}); err != nil {
-				slog.Warn("record upstream failure failed", "key_id", key.ID, "error", err)
-			}
-		}
-		s.inFlight.Add(-1)
-		releaseCapacity()
-		releaseProbe()
-		if result.committed {
-			s.log(r.Context(), requestID, inbound, key.ProviderID, key.ID, modelName, result.status, start, result.usage, result.errorType)
+		result, done := s.attemptKey(w, r, key, pr, requestID, start, attempted, releaseCapacity, releaseProbe)
+		if done {
 			return
 		}
+		last = result
 		if !result.retryable || (result.ambiguous && !s.cfg.Routing.RetryAmbiguousErrors) {
 			break
 		}
@@ -354,6 +304,103 @@ func (s *Service) proxy(w http.ResponseWriter, r *http.Request) {
 	}
 	s.log(r.Context(), requestID, inbound, lastProviderID, lastKeyID, modelName, status, start, last.usage, last.errorType)
 	writeJSON(w, status, map[string]any{"error": map[string]any{"message": last.message, "type": last.errorType}})
+}
+
+// proxyRequest carries the immutable, per-request data shared across upstream attempts.
+type proxyRequest struct {
+	body            []byte
+	inbound         string
+	pathModel       string
+	modelName       string
+	requestedStream bool
+	statefulRequest bool
+	resourceRefs    []string
+}
+
+// attemptKey forwards the request to a single upstream key, trying the native protocol and an
+// optional OpenAI fallback. It always releases the acquired capacity slot, recovery probe, and
+// in-flight counter before returning. The bool return reports whether the request is fully handled
+// (response written); when false the caller may retry with the next candidate.
+func (s *Service) attemptKey(w http.ResponseWriter, r *http.Request, key model.Key, pr proxyRequest, requestID string, start time.Time, attempted int, releaseCapacity, releaseProbe func()) (attemptResult, bool) {
+	s.inFlight.Add(1)
+	defer func() {
+		s.inFlight.Add(-1)
+		releaseCapacity()
+		releaseProbe()
+	}()
+	s.upstreamAttempts.Add(1)
+	if attempted > 1 {
+		s.retryAttempts.Add(1)
+	}
+
+	native := router.ChooseUpstreamProtocol(pr.inbound, key)
+	protocols := []string{native}
+	if !pr.statefulRequest {
+		if fallback := openAIFallbackProtocol(r.URL.Path, pr.inbound, native); fallback != "" {
+			protocols = append(protocols, fallback)
+		}
+	}
+
+	var result attemptResult
+	for protocolIndex, upstream := range protocols {
+		if protocolIndex > 0 {
+			s.upstreamAttempts.Add(1)
+			s.retryAttempts.Add(1)
+		}
+		converted, convertErr := protocol.ConvertRequest(pr.body, pr.inbound, upstream, key.UpstreamModel, pr.pathModel)
+		if convertErr != nil {
+			result = attemptResult{status: http.StatusBadRequest, errorType: "protocol_error", message: convertErr.Error()}
+			break
+		}
+		if pr.requestedStream {
+			converted, convertErr = protocol.EnableStreaming(converted, upstream)
+			if convertErr != nil {
+				result = attemptResult{status: http.StatusBadRequest, errorType: "protocol_error", message: convertErr.Error()}
+				break
+			}
+		}
+		target := upstreamURL(key.ProviderBaseURL, protocol.UpstreamPath(r.URL.Path, upstream, key.UpstreamModel, converted.Stream))
+		if upstream == router.ProtocolGemini && converted.Stream {
+			target = withQuery(target, "alt", "sse")
+		}
+		result = s.forward(w, r, target, key, pr.inbound, upstream, requestID, converted)
+		if !result.ok && r.Context().Err() != nil {
+			result = clientCanceledResult(result)
+		}
+		if result.ok {
+			if pr.inbound == router.ProtocolOpenAIResponses {
+				ids := append(append([]string(nil), pr.resourceRefs...), result.responseResourceIDs...)
+				if err := s.store.PutUpstreamAffinity(r.Context(), ids, key.ProviderID, key.ID); err != nil {
+					slog.Warn("record upstream resource affinity failed", "key_id", key.ID, "error", err)
+				}
+			}
+			if err := s.router.RecordSuccess(r.Context(), key); err != nil {
+				slog.Warn("record upstream success failed", "key_id", key.ID, "error", err)
+			}
+			s.log(r.Context(), requestID, pr.inbound, key.ProviderID, key.ID, pr.modelName, result.status, start, result.usage, "")
+			return result, true
+		}
+		if protocolIndex == 0 && result.endpointUnsupported && len(protocols) > 1 {
+			continue
+		}
+		break
+	}
+
+	if router.CountsAgainstKeyHealth(result.errorType) {
+		if err := s.router.RecordFailure(r.Context(), key, router.Failure{
+			Status:            result.status,
+			ErrorType:         result.errorType,
+			Message:           result.message,
+			RetryAfterSeconds: result.retryAfterSeconds,
+		}); err != nil {
+			slog.Warn("record upstream failure failed", "key_id", key.ID, "error", err)
+		}
+	}
+	if result.committed {
+		s.log(r.Context(), requestID, pr.inbound, key.ProviderID, key.ID, pr.modelName, result.status, start, result.usage, result.errorType)
+		return result, true
+	}
+	return result, false
 }
 
 func (s *Service) forward(w http.ResponseWriter, r *http.Request, target string, key model.Key, inbound, upstream, gatewayRequestID string, converted protocol.ConvertedRequest) attemptResult {
@@ -519,9 +566,40 @@ func (s *Service) metrics(w http.ResponseWriter, r *http.Request) {
 		writeProxyStoreError(w, "load metrics", err)
 		return
 	}
-	body := fmt.Sprintf("# TYPE gateway_keys_total gauge\ngateway_keys_total %d\n# TYPE gateway_keys_active gauge\ngateway_keys_active %d\n# TYPE gateway_keys_cooling_down gauge\ngateway_keys_cooling_down %d\n# TYPE gateway_today_requests gauge\ngateway_today_requests %d\n# TYPE gateway_today_tokens gauge\ngateway_today_tokens %d\n# TYPE gateway_request_logs_dropped_total counter\ngateway_request_logs_dropped_total %d\n# TYPE gateway_in_flight_requests gauge\ngateway_in_flight_requests %d\n# TYPE gateway_upstream_attempts_total counter\ngateway_upstream_attempts_total %d\n# TYPE gateway_retry_attempts_total counter\ngateway_retry_attempts_total %d\n# TYPE gateway_rejected_requests_total counter\ngateway_rejected_requests_total %d\n", stats.TotalKeys, stats.ActiveKeys, stats.FailedKeys, stats.TodayRequests, stats.TodayTokens, stats.DroppedRequestLogs, s.inFlight.Load(), s.upstreamAttempts.Load(), s.retryAttempts.Load(), s.rejectedRequests.Load())
+	metrics := []struct {
+		name  string
+		typ   string
+		value uint64
+	}{
+		{"gateway_keys_total", "gauge", uint64(stats.TotalKeys)},
+		{"gateway_keys_active", "gauge", uint64(stats.ActiveKeys)},
+		{"gateway_keys_cooling_down", "gauge", uint64(stats.FailedKeys)},
+		{"gateway_today_requests", "gauge", uint64(stats.TodayRequests)},
+		{"gateway_today_tokens", "gauge", uint64(stats.TodayTokens)},
+		{"gateway_request_logs_dropped_total", "counter", stats.DroppedRequestLogs},
+		{"gateway_in_flight_requests", "gauge", uint64(s.inFlight.Load())},
+		{"gateway_upstream_attempts_total", "counter", s.upstreamAttempts.Load()},
+		{"gateway_retry_attempts_total", "counter", s.retryAttempts.Load()},
+		{"gateway_rejected_requests_total", "counter", s.rejectedRequests.Load()},
+	}
+	var b strings.Builder
+	for _, m := range metrics {
+		fmt.Fprintf(&b, "# TYPE %s %s\n%s %d\n", m.name, m.typ, m.name, m.value)
+	}
+	errorCounts := s.errorCountsSnapshot()
+	if len(errorCounts) > 0 {
+		types := make([]string, 0, len(errorCounts))
+		for t := range errorCounts {
+			types = append(types, t)
+		}
+		sort.Strings(types)
+		b.WriteString("# TYPE gateway_errors_total counter\n")
+		for _, t := range types {
+			fmt.Fprintf(&b, "gateway_errors_total{type=%q} %d\n", t, errorCounts[t])
+		}
+	}
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
-	if _, err := w.Write([]byte(body)); err != nil {
+	if _, err := w.Write([]byte(b.String())); err != nil {
 		slog.Warn("write metrics response failed", "error", err)
 	}
 }
@@ -616,9 +694,25 @@ func requestGatewayToken(r *http.Request) string {
 }
 
 func (s *Service) log(ctx context.Context, requestID, inbound, providerID, keyID, modelName string, status int, start time.Time, usage protocol.Usage, errType string) {
+	if errType != "" {
+		s.errorCountsMu.Lock()
+		s.errorCounts[errType]++
+		s.errorCountsMu.Unlock()
+	}
 	if err := s.store.LogRequest(ctx, model.RequestLog{RequestID: requestID, InboundProtocol: inbound, ProviderID: providerID, KeyID: keyID, Model: modelName, Status: status, LatencyMS: time.Since(start).Milliseconds(), PromptTokens: usage.PromptTokens, CompletionTokens: usage.CompletionTokens, TotalTokens: usage.TotalTokens, ErrorType: errType}); err != nil {
 		slog.Warn("record request log failed", "request_id", requestID, "error", err)
 	}
+}
+
+// errorCountsSnapshot returns a stable copy of the per-error-type counters for metrics rendering.
+func (s *Service) errorCountsSnapshot() map[string]uint64 {
+	s.errorCountsMu.Lock()
+	defer s.errorCountsMu.Unlock()
+	out := make(map[string]uint64, len(s.errorCounts))
+	for k, v := range s.errorCounts {
+		out[k] = v
+	}
+	return out
 }
 
 func upstreamURL(baseURL, upstreamPath string) string {
@@ -805,23 +899,7 @@ func errorMessage(body []byte, fallback string) string {
 }
 
 func sanitizeUpstreamMessage(message, secret string) string {
-	message = strings.TrimSpace(message)
-	if message == "" {
-		return "upstream request failed"
-	}
-	if secret = strings.TrimSpace(secret); secret != "" {
-		message = strings.ReplaceAll(message, secret, "***")
-	}
-	lower := strings.ToLower(message)
-	for _, marker := range []string{"authorization:", "bearer ", "x-api-key:", "x-goog-api-key:", "anthropic-auth-token:"} {
-		if strings.Contains(lower, marker) {
-			return "upstream request failed; sensitive details redacted"
-		}
-	}
-	if len(message) > 300 {
-		return message[:300]
-	}
-	return message
+	return redact.Message(message, secret, "upstream request failed")
 }
 
 func isStreamRequest(path string, body []byte) bool {

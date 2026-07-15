@@ -132,3 +132,37 @@ func TestGatewayKeyUsageFlushesOnClose(t *testing.T) {
 		t.Fatalf("persisted gateway key usage = %#v", items)
 	}
 }
+
+func TestCreateGatewayKeyDisambiguatesCollidingIDs(t *testing.T) {
+	st, err := Open(filepath.Join(t.TempDir(), "gateway.db"), filepath.Join(t.TempDir(), "secret.key"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+
+	ctx := context.Background()
+	// The same name slugs to the same base ID, so the second create must fall back to a
+	// random suffix instead of failing on the primary-key collision.
+	first, err := st.CreateGatewayKey(ctx, "duplicate")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := st.CreateGatewayKey(ctx, "duplicate")
+	if err != nil {
+		t.Fatalf("second create with colliding name failed: %v", err)
+	}
+	if first.ID == second.ID {
+		t.Fatalf("expected distinct ids, both were %q", first.ID)
+	}
+	if !strings.HasPrefix(second.ID, first.ID+"-") {
+		t.Fatalf("second id %q should extend base %q with a suffix", second.ID, first.ID)
+	}
+
+	items, err := st.ListGatewayKeys(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("expected 2 persisted keys, got %d", len(items))
+	}
+}

@@ -193,7 +193,11 @@ func Classify(status int, message string) string {
 	return "upstream_error"
 }
 
-func Retryable(errorType string) bool {
+// recoverableUpstreamError reports whether an upstream error type reflects a genuine upstream
+// problem (as opposed to a client cancel or protocol mismatch). Both retry eligibility and key
+// health accounting currently key off the same set; they are kept as distinct exported functions
+// so their policies can diverge later without touching call sites.
+func recoverableUpstreamError(errorType string) bool {
 	switch errorType {
 	case "auth_error", "rate_limit", "server_error", "timeout", "empty_response", "upstream_error":
 		return true
@@ -202,13 +206,12 @@ func Retryable(errorType string) bool {
 	}
 }
 
+func Retryable(errorType string) bool {
+	return recoverableUpstreamError(errorType)
+}
+
 func CountsAgainstKeyHealth(errorType string) bool {
-	switch errorType {
-	case "auth_error", "rate_limit", "server_error", "timeout", "empty_response", "upstream_error":
-		return true
-	default:
-		return false
-	}
+	return recoverableUpstreamError(errorType)
 }
 
 func ChooseUpstreamProtocol(inboundProtocol string, key model.Key) string {

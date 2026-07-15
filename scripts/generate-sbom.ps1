@@ -1,6 +1,9 @@
 param(
   [Parameter(Mandatory = $true)]
-  [string]$OutputPath
+  [string]$OutputPath,
+  [string]$Version = $env:GITHUB_REF_NAME,
+  [string]$Commit = "unknown",
+  [string]$Platform = "unknown"
 )
 
 $ErrorActionPreference = "Stop"
@@ -21,12 +24,12 @@ if ($LASTEXITCODE -ne 0) {
 $moduleLines | ForEach-Object {
   $fields = $_ -split '\|', 3
   $path = $fields[0]
-  $version = if ($fields.Count -gt 1 -and $fields[1]) { $fields[1] } else { "devel" }
+  $moduleVersion = if ($fields.Count -gt 1 -and $fields[1]) { $fields[1] } else { "devel" }
   $component = [ordered]@{
     type = "library"
     name = $path
-    version = $version
-    purl = "pkg:golang/$path@$version"
+    version = $moduleVersion
+    purl = "pkg:golang/$path@$moduleVersion"
   }
   $components += $component
 }
@@ -38,7 +41,15 @@ $sbom = [ordered]@{
   version = 1
   metadata = @{
     timestamp = [DateTime]::UtcNow.ToString("o")
-    component = @{ type = "application"; name = "local-ai-gateway"; version = $env:GITHUB_REF_NAME }
+    component = @{
+      type = "application"
+      name = "local-ai-gateway"
+      version = $Version
+      properties = @(
+        @{ name = "local-ai-gateway:commit"; value = $Commit }
+        @{ name = "local-ai-gateway:platform"; value = $Platform }
+      )
+    }
   }
   components = $components
 }
