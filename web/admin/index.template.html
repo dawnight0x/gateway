@@ -97,16 +97,27 @@
             </div>
           </article>
           <article class="panel">
-            <div class="panel-title">
+            <div class="panel-title traffic-heading">
               <h2>{{ t('dashboard.recent') }}</h2>
+              <small>{{ t('dashboard.recentCount', { count: recentLogs.length }) }}</small>
             </div>
-            <div class="log-list">
-              <div v-for="log in recentLogs" :key="log.id" class="log-row">
-                <span>{{ log.status }}</span>
-                <strong>{{ log.model || '-' }}</strong>
-                <small>{{ log.inboundProtocol }} · {{ log.latencyMs }}ms · {{ log.errorType || 'ok' }}</small>
+            <div class="log-list traffic-list">
+              <div v-for="log in recentLogs" :key="log.id" :class="['log-row', 'traffic-row', logStatusClass(log.status)]">
+                <span class="sr-only">{{ logStatusLabel(log.status) }}</span>
+                <span class="traffic-marker" aria-hidden="true"></span>
+                <div class="traffic-primary">
+                  <span class="traffic-status">{{ log.status || '-' }}</span>
+                  <strong class="traffic-protocol">{{ logProtocolLabel(log.inboundProtocol) }}</strong>
+                  <span class="traffic-latency">{{ log.latencyMs }} ms</span>
+                  <time class="traffic-time" :datetime="log.createdAt">{{ formatShortTime(log.createdAt) }}</time>
+                </div>
+                <div class="traffic-secondary">
+                  <span :class="['traffic-model', { muted: !log.model || String(log.model).toLowerCase() === 'auto' }]">{{ logModelLabel(log.model) }}</span>
+                  <span v-if="log.providerId" class="traffic-provider">{{ log.providerId }}</span>
+                  <span v-if="log.errorType" class="traffic-error">{{ log.errorType }}</span>
+                </div>
               </div>
-              <div v-if="!recentLogs.length" class="empty-state">
+              <div v-if="!recentLogs.length" class="empty-state compact-empty">
                 <strong>{{ t('empty.logs') }}</strong>
                 <small>{{ t('empty.logsHint') }}</small>
               </div>

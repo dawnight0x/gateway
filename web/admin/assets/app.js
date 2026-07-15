@@ -369,6 +369,46 @@ createApp({
       return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}:${parts.second} UTC+8`;
     };
 
+    const formatShortTime = (value) => {
+      if (!value) return '-';
+      const date = value instanceof Date ? value : new Date(value);
+      if (Number.isNaN(date.getTime())) return '-';
+      const parts = Object.fromEntries(
+        singaporeTimeFormatter.formatToParts(date).map((part) => [part.type, part.value])
+      );
+      return `${parts.hour}:${parts.minute}:${parts.second}`;
+    };
+
+    const logStatusClass = (status) => {
+      const code = Number(status);
+      if (code >= 200 && code < 300) return 'is-success';
+      if (code >= 400 && code < 500) return 'is-warning';
+      return 'is-error';
+    };
+
+    const logStatusLabel = (status) => {
+      const state = logStatusClass(status);
+      if (state === 'is-success') return t('dashboard.requestSuccess');
+      if (state === 'is-warning') return t('dashboard.requestWarning');
+      return t('dashboard.requestError');
+    };
+
+    const logProtocolLabel = (protocol) => {
+      const labels = {
+        openai: 'OpenAI',
+        'openai-responses': 'OpenAI Responses',
+        anthropic: 'Anthropic',
+        gemini: 'Gemini',
+      };
+      const value = String(protocol || '').trim();
+      return labels[value.toLowerCase()] || value || '-';
+    };
+
+    const logModelLabel = (model) => {
+      const value = String(model || '').trim();
+      return !value || value.toLowerCase() === 'auto' ? t('dashboard.autoRoute') : value;
+    };
+
     const providerKeyHints = (providerId) => keys.value
       .filter((k) => k.providerId === providerId)
       .map((k) => k.keyHint || '***');
@@ -898,6 +938,11 @@ createApp({
       createdGatewayKey,
       formError,
       formatSingaporeTime,
+      formatShortTime,
+      logModelLabel,
+      logProtocolLabel,
+      logStatusClass,
+      logStatusLabel,
       gatewayKeyForm,
       gatewayKeys,
       keyForm,
