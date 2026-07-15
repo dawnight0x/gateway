@@ -210,7 +210,7 @@
                 <div class="provider-actions">
                   <button type="button" @click="openKeyForm(p)">{{ t('action.addKey') }}</button>
                   <button class="ghost" type="button" @click="editProvider(p)">{{ t('action.editProvider') }}</button>
-                  <button class="ghost" type="button" @click="toggleProvider(p)">{{ t('action.toggle') }}</button>
+                  <button class="ghost" type="button" @click="toggleProvider(p)">{{ p.enabled ? t('action.disable') : t('action.enable') }}</button>
                   <button class="danger" type="button" @click="deleteProvider(p)">{{ t('action.delete') }}</button>
                 </div>
               </div>
@@ -302,6 +302,7 @@
                     <div>
                       <div class="key-title-row">
                         <strong class="key-name">{{ k.name || k.id }}</strong>
+                        <span class="pill">{{ t('table.priority') }} {{ k.priority }}</span>
                         <span v-if="k.manualPreferred" class="pill ok">{{ t('status.preferred') }}</span>
                         <span :class="['pill', k.enabled ? 'ok' : 'bad']">{{ k.enabled ? t('status.enabled') : t('status.disabled') }}</span>
                       </div>
@@ -351,7 +352,7 @@
                     <button class="ghost" type="button" @click="editKey(k)">{{ t('action.editKey') }}</button>
                     <button class="ghost" type="button" @click="preferKey(k)">{{ t('action.prefer') }}</button>
                     <button class="ghost" type="button" @click="resetKey(k)">{{ t('action.reset') }}</button>
-                    <button class="ghost" type="button" @click="toggleKey(k)">{{ t('action.toggle') }}</button>
+                    <button class="ghost" type="button" @click="toggleKey(k)">{{ k.enabled ? t('action.disable') : t('action.enable') }}</button>
                     <button class="danger" type="button" @click="deleteKey(k)">{{ t('action.delete') }}</button>
                   </div>
                 </div>
@@ -467,7 +468,7 @@
                     <span :class="['pill', k.enabled ? 'ok' : 'bad']">{{ k.enabled ? t('status.enabled') : t('status.disabled') }}</span>
                   </td>
                   <td class="actions">
-                    <button class="ghost" type="button" @click="toggleGatewayKey(k)">{{ t('action.toggle') }}</button>
+                    <button class="ghost" type="button" @click="toggleGatewayKey(k)">{{ k.enabled ? t('action.disable') : t('action.enable') }}</button>
                     <button class="ghost" type="button" @click="rotateGatewayKey(k)">{{ t('action.rotate') }}</button>
                     <button class="danger" type="button" @click="deleteGatewayKey(k)">{{ t('action.delete') }}</button>
                   </td>
@@ -481,20 +482,53 @@
       <section v-show="activeSection === 'routing'" class="section">
         <article class="panel">
           <form class="form-grid routing-form" @submit.prevent="saveRouting">
-            <label><span>{{ t('routing.failureThreshold') }}</span><input v-model.number="routing.failureThreshold" type="number" min="1"></label>
-            <label><span>{{ t('routing.cooldownSeconds') }}</span><input v-model.number="routing.cooldownSeconds" type="number" min="0"></label>
-            <label><span>{{ t('routing.authCooldownSeconds') }}</span><input v-model.number="routing.authCooldownSeconds" type="number" min="0"></label>
-            <label><span>{{ t('routing.retryPerRequest') }}</span><input v-model.number="routing.retryPerRequest" type="number" min="1"></label>
-            <label><span>{{ t('routing.timeoutSeconds') }}</span><input v-model.number="routing.timeoutSeconds" type="number" min="1"></label>
-            <label><span>{{ t('routing.streamIdleTimeoutSeconds') }}</span><input v-model.number="routing.streamIdleTimeoutSeconds" type="number" min="1"></label>
-            <label><span>{{ t('routing.streamWriteTimeoutSeconds') }}</span><input v-model.number="routing.streamWriteTimeoutSeconds" type="number" min="1"></label>
-            <label><span>{{ t('routing.maxConcurrentRequests') }}</span><input v-model.number="routing.maxConcurrentRequests" type="number" min="0"></label>
-            <label><span>{{ t('routing.maxConcurrentPerProvider') }}</span><input v-model.number="routing.maxConcurrentPerProvider" type="number" min="0"></label>
-            <label><span>{{ t('routing.maxConcurrentPerKey') }}</span><input v-model.number="routing.maxConcurrentPerKey" type="number" min="0"></label>
-            <label><span>{{ t('routing.queueTimeoutMilliseconds') }}</span><input v-model.number="routing.queueTimeoutMilliseconds" type="number" min="0"></label>
-            <label class="check"><input v-model="routing.streamRetryBeforeFirstByte" type="checkbox"> {{ t('routing.streamRetryBeforeFirstByte') }}</label>
-            <label class="check"><input v-model="routing.retryAmbiguousErrors" type="checkbox"> {{ t('routing.retryAmbiguousErrors') }}</label>
-            <label class="check"><input v-model="routing.allowInsecureUpstreams" type="checkbox"> {{ t('routing.allowInsecureUpstreams') }}</label>
+            <div class="routing-section">
+              <div class="routing-section-heading">
+                <div>
+                  <strong>{{ t('routing.simpleTitle') }}</strong>
+                  <small>{{ t('routing.simpleCopy') }}</small>
+                </div>
+              </div>
+              <div class="routing-fields">
+                <label><span>{{ t('routing.failureThreshold') }}</span><input v-model.number="routing.failureThreshold" type="number" min="1"></label>
+                <label><span>{{ t('routing.cooldownSeconds') }}</span><input v-model.number="routing.cooldownSeconds" type="number" min="0"></label>
+                <label><span>{{ t('routing.retryPerRequest') }}</span><input v-model.number="routing.retryPerRequest" type="number" min="1"></label>
+                <label><span>{{ t('routing.timeoutSeconds') }}</span><input v-model.number="routing.timeoutSeconds" type="number" min="1"></label>
+                <label><span>{{ t('routing.maxConcurrentRequests') }}</span><input v-model.number="routing.maxConcurrentRequests" type="number" min="0"></label>
+                <label class="check"><input v-model="routing.streamRetryBeforeFirstByte" type="checkbox"> {{ t('routing.streamRetryBeforeFirstByte') }}</label>
+              </div>
+            </div>
+            <div class="routing-advanced-toggle">
+              <button
+                class="ghost"
+                type="button"
+                :aria-expanded="routingAdvanced"
+                aria-controls="routing-advanced"
+                @click="routingAdvanced = !routingAdvanced"
+              >{{ routingAdvanced ? t('routing.hideAdvanced') : t('routing.showAdvanced') }}</button>
+            </div>
+            <div v-if="routingAdvanced" id="routing-advanced" class="routing-section routing-advanced-section">
+              <div class="routing-section-heading">
+                <div>
+                  <strong>{{ t('routing.advancedTitle') }}</strong>
+                  <small>{{ t('routing.advancedCopy') }}</small>
+                </div>
+              </div>
+              <div class="routing-fields">
+                <label><span>{{ t('routing.authCooldownSeconds') }}</span><input v-model.number="routing.authCooldownSeconds" type="number" min="0"></label>
+                <label><span>{{ t('routing.streamIdleTimeoutSeconds') }}</span><input v-model.number="routing.streamIdleTimeoutSeconds" type="number" min="1"></label>
+                <label><span>{{ t('routing.streamWriteTimeoutSeconds') }}</span><input v-model.number="routing.streamWriteTimeoutSeconds" type="number" min="1"></label>
+                <label><span>{{ t('routing.maxConcurrentPerProvider') }}</span><input v-model.number="routing.maxConcurrentPerProvider" type="number" min="0"></label>
+                <label><span>{{ t('routing.maxConcurrentPerKey') }}</span><input v-model.number="routing.maxConcurrentPerKey" type="number" min="0"></label>
+                <label><span>{{ t('routing.queueTimeoutMilliseconds') }}</span><input v-model.number="routing.queueTimeoutMilliseconds" type="number" min="0"></label>
+              </div>
+              <div class="routing-risk">
+                <strong>{{ t('routing.riskTitle') }}</strong>
+                <small>{{ t('routing.riskCopy') }}</small>
+                <label class="check"><input v-model="routing.retryAmbiguousErrors" type="checkbox"> {{ t('routing.retryAmbiguousErrors') }}</label>
+                <label class="check"><input v-model="routing.allowInsecureUpstreams" type="checkbox"> {{ t('routing.allowInsecureUpstreams') }}</label>
+              </div>
+            </div>
             <div class="form-actions"><button type="submit">{{ t('action.save') }}</button></div>
           </form>
           <div v-if="routingMessage" class="form-success" role="status">{{ routingMessage }}</div>

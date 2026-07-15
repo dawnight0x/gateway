@@ -51,6 +51,7 @@ createApp({
     const logFilters = reactive({ q: '', status: '', providerId: '', keyId: '', model: '', errorType: '' });
     const logsLoading = ref(false);
     const routing = ref({});
+    const routingAdvanced = ref(false);
     const routingMessage = ref('');
     const maintenanceMessage = ref('');
     const backupPassphrase = ref('');
@@ -1012,6 +1013,7 @@ createApp({
       refreshing,
       refreshBalances,
       routing,
+      routingAdvanced,
       routingMessage,
       saveRouting,
       maintenanceMessage,

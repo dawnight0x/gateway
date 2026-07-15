@@ -1602,11 +1602,57 @@ code {
 }
 
 .routing-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 14px;
+}
+
+.routing-section,
+.routing-advanced-toggle,
+.routing-form > .form-actions {
+  min-width: 0;
+}
+
+.routing-section {
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.routing-section-heading {
+  display: flex;
+  min-width: 0;
+  margin-bottom: 14px;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.routing-section-heading strong,
+.routing-risk strong {
+  display: block;
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.routing-section-heading small,
+.routing-risk small {
+  display: block;
+  margin-top: 3px;
+  color: var(--ink-subtle);
+  font-size: 12px;
+}
+
+.routing-fields {
+  display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
   align-items: end;
 }
 
-.routing-form > label:not(.check) {
+.routing-fields > label:not(.check) {
   display: grid;
   gap: 7px;
   min-width: 0;
@@ -1614,9 +1660,28 @@ code {
   font-size: 12px;
 }
 
-.routing-form .check {
+.routing-fields .check {
   min-height: 42px;
   align-items: center;
+}
+
+.routing-advanced-toggle {
+  display: flex;
+  justify-content: flex-start;
+}
+
+.routing-risk {
+  display: grid;
+  margin-top: 16px;
+  padding: 12px;
+  gap: 8px;
+  border: 1px solid var(--amber);
+  border-radius: var(--radius-sm);
+  background: var(--amber-soft);
+}
+
+.routing-risk .check {
+  min-height: 32px;
 }
 
 .form-success {
@@ -1653,7 +1718,7 @@ code {
 }
 
 @media (max-width: 980px) {
-  .routing-form {
+  .routing-fields {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
@@ -1663,7 +1728,7 @@ code {
 }
 
 @media (max-width: 560px) {
-  .routing-form,
+  .routing-fields,
   .log-toolbar {
     grid-template-columns: minmax(0, 1fr);
   }
