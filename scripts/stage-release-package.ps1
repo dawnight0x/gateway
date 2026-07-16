@@ -8,7 +8,8 @@ param(
   [Parameter(Mandatory = $true)]
   [string]$BuiltAt,
   [Parameter(Mandatory = $true)]
-  [string]$Platform
+  [string]$Platform,
+  [string]$PackageName = "local-ai-gateway"
 )
 
 $ErrorActionPreference = "Stop"
@@ -54,13 +55,14 @@ foreach ($doc in @("linux.md", "operations.md", "protocol-compatibility.md")) {
   -OutputPath (Join-Path $Destination "sbom.cdx.json") `
   -Version $Version `
   -Commit $Commit `
-  -Platform $Platform
+  -Platform $Platform `
+  -PackageName $PackageName
 if ($LASTEXITCODE -ne 0) {
   throw "SBOM generation failed with exit code $LASTEXITCODE"
 }
 
 $metadata = [ordered]@{
-  name = "local-ai-gateway"
+  name = $PackageName
   version = $Version
   commit = $Commit
   builtAt = $BuiltAt

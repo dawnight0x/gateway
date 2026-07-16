@@ -2,7 +2,10 @@ name: Release
 
 on:
   push:
-    tags: ["v*"]
+    tags: ["v[0-9]*", "[0-9]*"]
+
+env:
+  PACKAGE_NAME: gateway-beta6
 
 permissions:
   contents: write
@@ -18,12 +21,15 @@ jobs:
           - goos: windows
             goarch: amd64
             suffix: .exe
+            package_platform: win-x64
           - goos: linux
             goarch: amd64
             suffix: ""
+            package_platform: linux-amd64
           - goos: linux
             goarch: arm64
             suffix: ""
+            package_platform: linux-arm64
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -35,29 +41,29 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      - name: Normalize release version
+        shell: pwsh
+        run: |
+          $match = [regex]::Match("${{ github.ref_name }}", '^v?(?<major>0|[1-9][0-9]*)\.(?<minor>0|[1-9][0-9]*)\.(?<patch>0|[1-9][0-9]*)$')
+          if (-not $match.Success) {
+            throw "release tag must use major.minor.patch format"
+          }
+          "RELEASE_VERSION=$($match.Groups['major'].Value).$($match.Groups['minor'].Value).$($match.Groups['patch'].Value)" >> $env:GITHUB_ENV
+          "WINDOWS_MAJOR=$($match.Groups['major'].Value)" >> $env:GITHUB_ENV
+          "WINDOWS_MINOR=$($match.Groups['minor'].Value)" >> $env:GITHUB_ENV
+          "WINDOWS_PATCH=$($match.Groups['patch'].Value)" >> $env:GITHUB_ENV
       - run: npm ci && npm run build:admin
       - run: git diff --exit-code -- web/admin/index.html web/admin/assets/render.js web/admin/assets/vendor/vue.runtime.global.prod.js
       - name: Stamp Windows version resource
         if: matrix.goos == 'windows'
         shell: pwsh
         run: |
-          # goversioninfo is pure Go and emits a windows .syso from this linux
-          # host as long as GOOS is not overridden. Reuses the committed icon
-          # and manifest; stamps the numeric FixedFileInfo from the release tag
-          # so Explorer's file-version column matches the release.
-          $nums = [regex]::Matches("${{ github.ref_name }}", '\d+') | ForEach-Object { [int]$_.Value }
-          $maj = if ($nums.Count -ge 1) { $nums[0] } else { 0 }
-          $min = if ($nums.Count -ge 2) { $nums[1] } else { 0 }
-          $pat = if ($nums.Count -ge 3) { $nums[2] } else { 0 }
-          $bld = if ($nums.Count -ge 4) { $nums[3] } else { 0 }
-          go run github.com/josephspurrier/goversioninfo/cmd/goversioninfo@v1.5.0 `
-            -64 `
-            -o cmd/gateway/rsrc_windows_amd64.syso `
-            -icon cmd/gateway/app.ico `
-            -manifest cmd/gateway/app.manifest `
-            -ver-major $maj -ver-minor $min -ver-patch $pat -ver-build $bld `
-            -product-version "${{ github.ref_name }}" `
-            cmd/gateway/versioninfo.json
+          ./scripts/generate-windows-resources.ps1 `
+            -Major ([int]$env:WINDOWS_MAJOR) `
+            -Minor ([int]$env:WINDOWS_MINOR) `
+            -Patch ([int]$env:WINDOWS_PATCH) `
+            -Build 0 `
+            -ProductVersion $env:RELEASE_VERSION
       - name: Build binaries
         shell: pwsh
         env:
@@ -65,11 +71,11 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: "0"
         run: |
-          $name = "local-ai-gateway-${{ github.ref_name }}-${{ matrix.goos }}-${{ matrix.goarch }}"
+          $name = "$env:PACKAGE_NAME-${{ matrix.package_platform }}"
           New-Item -ItemType Directory -Force "stage/$name" | Out-Null
           $builtAt = [DateTime]::UtcNow.ToString("o")
           $ld = "-s -w " +
-            "-X local-ai-gateway/internal/buildinfo.Version=${{ github.ref_name }} " +
+            "-X local-ai-gateway/internal/buildinfo.Version=$env:RELEASE_VERSION " +
             "-X local-ai-gateway/internal/buildinfo.Commit=${{ github.sha }} " +
             "-X local-ai-gateway/internal/buildinfo.BuiltAt=$builtAt"
           # gateway is the tray app: -H=windowsgui suppresses the console window
@@ -82,10 +88,11 @@ jobs:
           go build -trimpath -buildvcs=false -ldflags $ld -o "stage/$name/gateway-backup${{ matrix.suffix }}" ./cmd/gateway-backup
           ./scripts/stage-release-package.ps1 `
             -Destination "stage/$name" `
-            -Version "${{ github.ref_name }}" `
+            -Version $env:RELEASE_VERSION `
             -Commit "${{ github.sha }}" `
             -BuiltAt $builtAt `
-            -Platform "${{ matrix.goos }}/${{ matrix.goarch }}"
+            -Platform "${{ matrix.goos }}/${{ matrix.goarch }}" `
+            -PackageName $env:PACKAGE_NAME
           if ("${{ matrix.goos }}" -eq "windows") {
             Compress-Archive -LiteralPath "stage/$name" -DestinationPath "stage/$name.zip" -CompressionLevel Optimal
           } else {
@@ -101,7 +108,7 @@ jobs:
             stage/*.tar.gz
       - uses: actions/upload-artifact@v4
         with:
-          name: local-ai-gateway-${{ matrix.goos }}-${{ matrix.goarch }}
+          name: ${{ env.PACKAGE_NAME }}-${{ matrix.package_platform }}
           path: |
             stage/*.zip
             stage/*.tar.gz
@@ -114,7 +121,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          pattern: local-ai-gateway-*
+          pattern: ${{ env.PACKAGE_NAME }}-*
           path: release
           merge-multiple: true
       - name: Create checksums

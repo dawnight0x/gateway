@@ -3,7 +3,8 @@ param(
   [string]$OutputPath,
   [string]$Version = $env:GITHUB_REF_NAME,
   [string]$Commit = "unknown",
-  [string]$Platform = "unknown"
+  [string]$Platform = "unknown",
+  [string]$PackageName = "local-ai-gateway"
 )
 
 $ErrorActionPreference = "Stop"
@@ -43,11 +44,11 @@ $sbom = [ordered]@{
     timestamp = [DateTime]::UtcNow.ToString("o")
     component = @{
       type = "application"
-      name = "local-ai-gateway"
+      name = $PackageName
       version = $Version
       properties = @(
-        @{ name = "local-ai-gateway:commit"; value = $Commit }
-        @{ name = "local-ai-gateway:platform"; value = $Platform }
+        @{ name = "${PackageName}:commit"; value = $Commit }
+        @{ name = "${PackageName}:platform"; value = $Platform }
       )
     }
   }

@@ -1,6 +1,6 @@
 # Local AI Gateway
 
-本地 AI 网关 v2：Go 后端核心 + 内嵌 Vue 本地管理后台 + 系统托盘。所有编程软件统一连接 `localhost`，真实 newapi、sub2api、OpenAI-compatible、Anthropic-compatible、Gemini-compatible key 在后台管理，由网关自动处理优先级、失败切换、协议转换和状态展示。
+本地 AI 网关：Go 后端核心 + 内嵌 Vue 本地管理后台 + 系统托盘。所有编程软件统一连接 `localhost`，真实 newapi、sub2api、OpenAI-compatible、Anthropic-compatible、Gemini-compatible key 在后台管理，由网关自动处理优先级、失败切换、协议转换和状态展示。
 
 ## 快速开始
 

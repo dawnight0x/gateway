@@ -1,6 +1,6 @@
 param(
-  [int]$Major = 2,
-  [int]$Minor = 0,
+  [int]$Major = 0,
+  [int]$Minor = 6,
   [int]$Patch = 0,
   [int]$Build = 0,
   [string]$ProductVersion = ""
@@ -14,28 +14,50 @@ if (-not (Test-Path -LiteralPath $Go)) {
   $Go = (Get-Command go -ErrorAction Stop).Source
 }
 $GatewayDir = Join-Path $Root "cmd\gateway"
+$BackupDir = Join-Path $Root "cmd\gateway-backup"
 $Icon = Join-Path $GatewayDir "app.ico"
-$Manifest = Join-Path $GatewayDir "app.manifest"
-$VersionInfo = Join-Path $GatewayDir "versioninfo.json"
-$Resource = Join-Path $GatewayDir "rsrc_windows_amd64.syso"
+$ManifestTemplate = Join-Path $GatewayDir "app.manifest"
+$GatewayVersionInfo = Join-Path $GatewayDir "versioninfo.json"
+$BackupVersionInfo = Join-Path $BackupDir "versioninfo.json"
+$GatewayResource = Join-Path $GatewayDir "rsrc_windows_amd64.syso"
+$BackupResource = Join-Path $BackupDir "rsrc_windows_amd64.syso"
+$GatewayManifest = Join-Path ([System.IO.Path]::GetTempPath()) ("gateway-manifest-" + [Guid]::NewGuid().ToString("N") + ".xml")
+$BackupManifest = Join-Path ([System.IO.Path]::GetTempPath()) ("gateway-backup-manifest-" + [Guid]::NewGuid().ToString("N") + ".xml")
 
+foreach ($part in @($Major, $Minor, $Patch, $Build)) {
+  if ($part -lt 0 -or $part -gt [uint16]::MaxValue) {
+    throw "Windows version components must be between 0 and $([uint16]::MaxValue)"
+  }
+}
 if ([string]::IsNullOrWhiteSpace($ProductVersion)) {
-  $ProductVersion = "$Major.$Minor.$Patch.$Build"
+  $ProductVersion = "$Major.$Minor.$Patch"
+}
+$ManifestVersion = "$Major.$Minor.$Patch.$Build"
+
+function Write-VersionedManifest([string]$Destination, [string]$IdentityName) {
+  [xml]$document = [System.IO.File]::ReadAllText($ManifestTemplate)
+  $identity = $document.SelectSingleNode("/*[local-name()='assembly']/*[local-name()='assemblyIdentity']")
+  if (-not $identity) {
+    throw "assemblyIdentity was not found in $ManifestTemplate"
+  }
+  $identity.SetAttribute("name", $IdentityName)
+  $identity.SetAttribute("version", $ManifestVersion)
+
+  $settings = [System.Xml.XmlWriterSettings]::new()
+  $settings.Encoding = [System.Text.UTF8Encoding]::new($false)
+  $settings.Indent = $true
+  $writer = [System.Xml.XmlWriter]::Create($Destination, $settings)
+  try {
+    $document.Save($writer)
+  } finally {
+    $writer.Dispose()
+  }
 }
 
-Push-Location -LiteralPath $Root
-try {
-  & $Go run -buildvcs=false .\scripts\generate-windows-icon.go $Icon
-  if ($LASTEXITCODE -ne 0) {
-    throw "icon generation failed with exit code $LASTEXITCODE"
-  }
-
-  # goversioninfo embeds the icon, VERSIONINFO block, and application manifest
-  # into a single .syso. rsrc only embeds the icon, leaving the exe without
-  # file/product version metadata or DPI/OS-compatibility manifest.
+function Invoke-VersionResource([string]$Output, [string]$VersionInfo, [string]$Manifest) {
   & $Go run github.com/josephspurrier/goversioninfo/cmd/goversioninfo@v1.5.0 `
     -64 `
-    -o $Resource `
+    -o $Output `
     -icon $Icon `
     -manifest $Manifest `
     -ver-major $Major `
@@ -45,11 +67,30 @@ try {
     -product-version $ProductVersion `
     $VersionInfo
   if ($LASTEXITCODE -ne 0) {
-    throw "Windows resource generation failed with exit code $LASTEXITCODE"
+    throw "Windows resource generation failed for $VersionInfo with exit code $LASTEXITCODE"
   }
+}
+
+Push-Location -LiteralPath $Root
+try {
+  & $Go run -buildvcs=false (Join-Path $Root "scripts\generate-windows-icon.go") $Icon
+  if ($LASTEXITCODE -ne 0) {
+    throw "icon generation failed with exit code $LASTEXITCODE"
+  }
+
+  Write-VersionedManifest $GatewayManifest "LocalAIGateway"
+  Write-VersionedManifest $BackupManifest "LocalAIGateway.Backup"
+  Invoke-VersionResource $GatewayResource $GatewayVersionInfo $GatewayManifest
+  Invoke-VersionResource $BackupResource $BackupVersionInfo $BackupManifest
 } finally {
   Pop-Location
+  foreach ($manifest in @($GatewayManifest, $BackupManifest)) {
+    if (Test-Path -LiteralPath $manifest) {
+      Remove-Item -LiteralPath $manifest -Force
+    }
+  }
 }
 
 Write-Host "Generated $Icon"
-Write-Host "Generated $Resource (FileVersion=$Major.$Minor.$Patch.$Build ProductVersion=$ProductVersion)"
+Write-Host "Generated $GatewayResource (FileVersion=$ManifestVersion ProductVersion=$ProductVersion)"
+Write-Host "Generated $BackupResource (FileVersion=$ManifestVersion ProductVersion=$ProductVersion)"

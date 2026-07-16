@@ -20,14 +20,14 @@
   },
   "StringFileInfo": {
     "CompanyName": "Local AI Gateway",
-    "FileDescription": "Local AI Gateway",
+    "FileDescription": "Local AI Gateway Backup Tool",
     "FileVersion": "0.6.0.0",
-    "InternalName": "gateway",
+    "InternalName": "gateway-backup",
     "LegalCopyright": "Local AI Gateway",
-    "OriginalFilename": "gateway.exe",
+    "OriginalFilename": "gateway-backup.exe",
     "ProductName": "Local AI Gateway",
     "ProductVersion": "0.6.0",
-    "Comments": "Local AI API gateway with embedded admin UI and system tray"
+    "Comments": "Offline restore and master key rotation tool"
   },
   "VarFileInfo": {
     "Translation": {
@@ -35,6 +35,6 @@
       "CharsetID": "04B0"
     }
   },
-  "IconPath": "app.ico",
-  "ManifestPath": "app.manifest"
+  "IconPath": "../gateway/app.ico",
+  "ManifestPath": "../gateway/app.manifest"
 }
