@@ -132,7 +132,11 @@ func (s *Service) tryTestKeyPath(ctx context.Context, key model.Key, path string
 			result.Error = redactSecret(sanitizeBalanceError(err.Error()), key.Secret)
 			return result
 		}
-		time.Sleep(300 * time.Millisecond)
+		if err := waitForRetry(ctx, 300*time.Millisecond); err != nil {
+			result.Status = "network_error"
+			result.Error = err.Error()
+			return result
+		}
 	}
 	defer resp.Body.Close()
 	result.StatusCode = resp.StatusCode
@@ -212,7 +216,11 @@ func (s *Service) tryTokenProbe(ctx context.Context, key model.Key, result *keyT
 			result.Error = redactSecret(sanitizeBalanceError(err.Error()), key.Secret)
 			return
 		}
-		time.Sleep(300 * time.Millisecond)
+		if err := waitForRetry(ctx, 300*time.Millisecond); err != nil {
+			result.TokenStatus = "network_error"
+			result.Error = err.Error()
+			return
+		}
 	}
 	defer resp.Body.Close()
 	result.TokenStatusCode = resp.StatusCode
@@ -237,6 +245,17 @@ func (s *Service) tryTokenProbe(ctx context.Context, key model.Key, result *keyT
 func keyTestHTTPClient(timeoutSeconds int) *http.Client {
 	timeout := time.Duration(timeoutSeconds) * time.Second
 	return upstreamhttp.New(timeout, timeout, 4)
+}
+
+func waitForRetry(ctx context.Context, delay time.Duration) error {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func retryableKeyTestError(err error) bool {

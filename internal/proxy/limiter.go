@@ -10,18 +10,23 @@ type requestLimiter struct {
 
 	mu        sync.Mutex
 	changed   chan struct{}
-	providers map[string]chan struct{}
-	keys      map[string]chan struct{}
+	providers map[string]*limiterEntry
+	keys      map[string]*limiterEntry
 	providerN int
 	keyN      int
+}
+
+type limiterEntry struct {
+	limit chan struct{}
+	refs  int
 }
 
 func newRequestLimiter(global, provider, key int) *requestLimiter {
 	return &requestLimiter{
 		global:    makeLimit(global),
 		changed:   make(chan struct{}),
-		providers: make(map[string]chan struct{}),
-		keys:      make(map[string]chan struct{}),
+		providers: make(map[string]*limiterEntry),
+		keys:      make(map[string]*limiterEntry),
 		providerN: provider,
 		keyN:      key,
 	}
@@ -44,9 +49,13 @@ func (l *requestLimiter) acquire(ctx context.Context, providerID, keyID string) 
 func (l *requestLimiter) tryAcquire(providerID, keyID string) (func(), bool) {
 	provider := l.provider(providerID)
 	key := l.key(keyID)
+	releaseEntries := func() {
+		l.releaseEntry(l.keys, keyID, key)
+		l.releaseEntry(l.providers, providerID, provider)
+	}
 	acquired := make([]chan struct{}, 0, 3)
 	// Acquire the narrowest limits first and never wait while holding one.
-	for _, limit := range []chan struct{}{key, provider, l.global} {
+	for _, limit := range []chan struct{}{entryLimit(key), entryLimit(provider), l.global} {
 		if limit == nil {
 			continue
 		}
@@ -55,11 +64,13 @@ func (l *requestLimiter) tryAcquire(providerID, keyID string) (func(), bool) {
 			acquired = append(acquired, limit)
 		default:
 			releaseLimits(acquired)
+			releaseEntries()
 			return func() {}, false
 		}
 	}
 	return func() {
 		releaseLimits(acquired)
+		releaseEntries()
 		l.signalChanged()
 	}, true
 }
@@ -91,32 +102,53 @@ func (l *requestLimiter) signalChanged() {
 	l.mu.Unlock()
 }
 
-func (l *requestLimiter) provider(id string) chan struct{} {
+func (l *requestLimiter) provider(id string) *limiterEntry {
 	if l.providerN <= 0 {
 		return nil
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if limit := l.providers[id]; limit != nil {
-		return limit
+	if entry := l.providers[id]; entry != nil {
+		entry.refs++
+		return entry
 	}
-	limit := makeLimit(l.providerN)
-	l.providers[id] = limit
-	return limit
+	entry := &limiterEntry{limit: makeLimit(l.providerN), refs: 1}
+	l.providers[id] = entry
+	return entry
 }
 
-func (l *requestLimiter) key(id string) chan struct{} {
+func (l *requestLimiter) key(id string) *limiterEntry {
 	if l.keyN <= 0 {
 		return nil
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if limit := l.keys[id]; limit != nil {
-		return limit
+	if entry := l.keys[id]; entry != nil {
+		entry.refs++
+		return entry
 	}
-	limit := makeLimit(l.keyN)
-	l.keys[id] = limit
-	return limit
+	entry := &limiterEntry{limit: makeLimit(l.keyN), refs: 1}
+	l.keys[id] = entry
+	return entry
+}
+
+func (l *requestLimiter) releaseEntry(entries map[string]*limiterEntry, id string, entry *limiterEntry) {
+	if entry == nil {
+		return
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	entry.refs--
+	if entry.refs == 0 && entries[id] == entry {
+		delete(entries, id)
+	}
+}
+
+func entryLimit(entry *limiterEntry) chan struct{} {
+	if entry == nil {
+		return nil
+	}
+	return entry.limit
 }
 
 func makeLimit(size int) chan struct{} {

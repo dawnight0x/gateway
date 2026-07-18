@@ -24,7 +24,7 @@ type Options struct {
 	OpenAIConfig    string
 	AnthropicConfig string
 	GeminiConfig    string
-	Restart         func()
+	Restart         func() error
 	Shutdown        func()
 }
 
@@ -117,8 +117,10 @@ func Run(opts Options) {
 					}
 					refreshAutostartMenu(autostart)
 				case <-restart.ClickedCh:
-					opts.Restart()
-					systray.Quit()
+					if err := restartAndQuit(opts.Restart, systray.Quit); err != nil {
+						slog.Error("restart failed", "error", err)
+						continue
+					}
 					return
 				case <-exit.ClickedCh:
 					opts.Shutdown()

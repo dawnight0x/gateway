@@ -2,7 +2,8 @@
   "name": "local-ai-gateway-admin-build",
   "private": true,
   "scripts": {
-    "build:admin": "node scripts/build-admin.mjs"
+    "build:admin": "node scripts/build-admin.mjs",
+    "test:admin": "node --test scripts/admin-app.test.mjs"
   },
   "devDependencies": {
     "@vue/compiler-dom": "3.5.22",

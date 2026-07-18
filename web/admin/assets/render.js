@@ -1276,7 +1276,7 @@ window.gatewayRender = function render(_ctx, _cache) {
                       }, _toDisplayString(_ctx.balanceStatusText(b.status)), 3 /* TEXT, CLASS */)
                     ]),
                     _createElementVNode("td", null, _toDisplayString(b.error || '-'), 1 /* TEXT */),
-                    _createElementVNode("td", null, _toDisplayString(_ctx.formatSingaporeTime(b.refreshedAt || b.updatedAt)), 1 /* TEXT */)
+                    _createElementVNode("td", null, _toDisplayString(_ctx.formatGatewayTime(b.refreshedAt || b.updatedAt)), 1 /* TEXT */)
                   ]))
                 }), 128 /* KEYED_FRAGMENT */)),
                 (!_ctx.balances.length)
@@ -1368,7 +1368,7 @@ window.gatewayRender = function render(_ctx, _cache) {
                           _createElementVNode("code", _hoisted_160, _toDisplayString(k.keyHint), 1 /* TEXT */)
                         ]),
                         _createElementVNode("td", null, _toDisplayString(k.requestCount), 1 /* TEXT */),
-                        _createElementVNode("td", null, _toDisplayString(_ctx.formatSingaporeTime(k.lastUsedAt)), 1 /* TEXT */),
+                        _createElementVNode("td", null, _toDisplayString(_ctx.formatGatewayTime(k.lastUsedAt)), 1 /* TEXT */),
                         _createElementVNode("td", null, [
                           _createElementVNode("span", {
                             class: _normalizeClass(['pill', k.enabled ? 'ok' : 'bad'])
@@ -1698,7 +1698,7 @@ window.gatewayRender = function render(_ctx, _cache) {
             _createElementVNode("button", {
               class: "ghost",
               type: "button",
-              onClick: _cache[78] || (_cache[78] = $event => (_ctx.activeSection = 'providers'))
+              onClick: _cache[78] || (_cache[78] = $event => (_ctx.setActiveSection('providers')))
             }, _toDisplayString(_ctx.t('action.backProviders')), 1 /* TEXT */)
           ]),
           _createElementVNode("div", _hoisted_189, [
@@ -1815,7 +1815,7 @@ window.gatewayRender = function render(_ctx, _cache) {
                   return (_openBlock(), _createElementBlock("tr", {
                     key: log.id
                   }, [
-                    _createElementVNode("td", null, _toDisplayString(_ctx.formatSingaporeTime(log.createdAt)), 1 /* TEXT */),
+                    _createElementVNode("td", null, _toDisplayString(_ctx.formatGatewayTime(log.createdAt)), 1 /* TEXT */),
                     _createElementVNode("td", null, _toDisplayString(log.inboundProtocol), 1 /* TEXT */),
                     _createElementVNode("td", null, _toDisplayString(log.model || '-'), 1 /* TEXT */),
                     _createElementVNode("td", null, _toDisplayString(log.providerId || '-'), 1 /* TEXT */),

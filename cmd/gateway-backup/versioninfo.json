@@ -2,13 +2,13 @@
   "FixedFileInfo": {
     "FileVersion": {
       "Major": 0,
-      "Minor": 6,
+      "Minor": 0,
       "Patch": 0,
       "Build": 0
     },
     "ProductVersion": {
       "Major": 0,
-      "Minor": 6,
+      "Minor": 0,
       "Patch": 0,
       "Build": 0
     },
@@ -21,12 +21,12 @@
   "StringFileInfo": {
     "CompanyName": "Local AI Gateway",
     "FileDescription": "Local AI Gateway Backup Tool",
-    "FileVersion": "0.6.0.0",
+    "FileVersion": "0.0.0.0",
     "InternalName": "gateway-backup",
     "LegalCopyright": "Local AI Gateway",
     "OriginalFilename": "gateway-backup.exe",
     "ProductName": "Local AI Gateway",
-    "ProductVersion": "0.6.0",
+    "ProductVersion": "0.0.0",
     "Comments": "Offline restore and master key rotation tool"
   },
   "VarFileInfo": {

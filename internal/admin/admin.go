@@ -397,7 +397,12 @@ func (s *Service) dashboard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"service":     map[string]any{"status": "ok", "proxyUrl": s.cfg.PublicURL(), "adminUrl": s.cfg.PublicURL() + "/admin"},
+		"service": map[string]any{
+			"status":   "ok",
+			"proxyUrl": s.cfg.PublicURL(),
+			"adminUrl": s.cfg.PublicURL() + "/admin",
+			"timezone": s.cfg.Storage.Timezone,
+		},
 		"stats":       stats,
 		"providers":   providers,
 		"keys":        keys,

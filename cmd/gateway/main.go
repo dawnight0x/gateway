@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -34,6 +35,9 @@ func main() {
 
 func run() (runErr error) {
 	normalizeWorkingDirectory()
+	if err := waitForRestartParent(); err != nil {
+		return err
+	}
 
 	cfg, err := config.Load()
 	if err != nil {
@@ -151,28 +155,34 @@ func run() (runErr error) {
 		})
 		return shutdownErr
 	}
-	restart := func() {
+	restart := func() error {
 		slog.Info("restarting gateway")
-		if err := shutdown(); err != nil {
-			slog.Error("restart shutdown failed", "error", err)
-			return
-		}
-		if err := db.Close(); err != nil {
-			slog.Error("restart database close failed", "error", err)
-			return
-		}
-		if err := lock.Release(); err != nil {
-			slog.Error("restart lock release failed", "error", err)
-			return
-		}
 		cmd := exec.Command(os.Args[0], os.Args[1:]...)
-		cmd.Env = os.Environ()
-		cmd.Dir, _ = os.Getwd()
+		cmd.Env = append(os.Environ(), "GATEWAY_RESTART_PARENT_PID="+strconv.Itoa(os.Getpid()))
+		workingDirectory, err := os.Getwd()
+		if err != nil {
+			return fmt.Errorf("resolve restart working directory: %w", err)
+		}
+		cmd.Dir = workingDirectory
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
-		if err := cmd.Start(); err != nil {
-			slog.Error("restart failed", "error", err)
+		startReplacement := func() (func(), error) {
+			if err := cmd.Start(); err != nil {
+				return nil, err
+			}
+			return func() {
+				if cmd.Process != nil {
+					_ = cmd.Process.Kill()
+					_ = cmd.Wait()
+				}
+			}, nil
 		}
+		replacementStarted, err := performRestart(startReplacement, shutdown, db.Close, lock.Release)
+		if replacementStarted && err != nil {
+			slog.Warn("restart cleanup completed with errors", "error", err)
+			return nil
+		}
+		return err
 	}
 
 	stop := make(chan os.Signal, 1)
@@ -238,6 +248,58 @@ func run() (runErr error) {
 	case err := <-serverErr:
 		return errors.Join(err, shutdown())
 	}
+}
+
+func performRestart(startReplacement func() (func(), error), shutdown, closeDatabase, releaseLock func() error) (replacementStarted bool, restartErr error) {
+	if startReplacement == nil {
+		return false, fmt.Errorf("restart step %q is not configured", "start replacement process")
+	}
+	steps := []struct {
+		name string
+		run  func() error
+	}{
+		{name: "shut down server", run: shutdown},
+		{name: "close database", run: closeDatabase},
+		{name: "release process lock", run: releaseLock},
+	}
+	for _, step := range steps {
+		if step.run == nil {
+			return false, fmt.Errorf("restart step %q is not configured", step.name)
+		}
+	}
+	abortReplacement, err := startReplacement()
+	if err != nil {
+		return false, fmt.Errorf("start replacement process: %w", err)
+	}
+	completed := false
+	defer func() {
+		if !completed && abortReplacement != nil {
+			abortReplacement()
+		}
+	}()
+	for _, step := range steps {
+		if err := step.run(); err != nil {
+			restartErr = errors.Join(restartErr, fmt.Errorf("%s: %w", step.name, err))
+		}
+	}
+	completed = true
+	return true, restartErr
+}
+
+func waitForRestartParent() error {
+	rawPID := strings.TrimSpace(os.Getenv("GATEWAY_RESTART_PARENT_PID"))
+	if rawPID == "" {
+		return nil
+	}
+	_ = os.Unsetenv("GATEWAY_RESTART_PARENT_PID")
+	pid, err := strconv.Atoi(rawPID)
+	if err != nil || pid <= 0 || pid == os.Getpid() {
+		return fmt.Errorf("invalid restart parent PID %q", rawPID)
+	}
+	if !desktop.WaitForProcessExit(pid, 30*time.Second) {
+		return fmt.Errorf("restart parent process %d did not exit within 30 seconds", pid)
+	}
+	return nil
 }
 
 func normalizeWorkingDirectory() {

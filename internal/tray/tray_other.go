@@ -11,7 +11,7 @@ type Options struct {
 	OpenAIConfig    string
 	AnthropicConfig string
 	GeminiConfig    string
-	Restart         func()
+	Restart         func() error
 	Shutdown        func()
 }
 

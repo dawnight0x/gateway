@@ -25,6 +25,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - run: npm run test:admin
       - run: npm run build:admin
       - run: git diff --exit-code -- web/admin/index.html web/admin/assets/render.js web/admin/assets/vendor/vue.runtime.global.prod.js
       - run: go mod verify

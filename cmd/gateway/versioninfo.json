@@ -2,13 +2,13 @@
   "FixedFileInfo": {
     "FileVersion": {
       "Major": 0,
-      "Minor": 6,
+      "Minor": 0,
       "Patch": 0,
       "Build": 0
     },
     "ProductVersion": {
       "Major": 0,
-      "Minor": 6,
+      "Minor": 0,
       "Patch": 0,
       "Build": 0
     },
@@ -21,12 +21,12 @@
   "StringFileInfo": {
     "CompanyName": "Local AI Gateway",
     "FileDescription": "Local AI Gateway",
-    "FileVersion": "0.6.0.0",
+    "FileVersion": "0.0.0.0",
     "InternalName": "gateway",
     "LegalCopyright": "Local AI Gateway",
     "OriginalFilename": "gateway.exe",
     "ProductName": "Local AI Gateway",
-    "ProductVersion": "0.6.0",
+    "ProductVersion": "0.0.0",
     "Comments": "Local AI API gateway with embedded admin UI and system tray"
   },
   "VarFileInfo": {

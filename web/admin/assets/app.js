@@ -35,7 +35,7 @@ createApp({
       window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}#${cleanSection}`);
     };
     const bootAdminToken = adminTokenFromHash();
-    const activeSection = ref(sectionFromHash());
+    const activeSection = ref('dashboard');
     const dashboard = ref(null);
     const providers = ref([]);
     const keys = ref([]);
@@ -230,20 +230,27 @@ createApp({
       return params.toString();
     };
 
+    let logRequestSequence = 0;
     const loadLogs = async (offset = 0) => {
-      if (!adminToken.value || logsLoading.value) return;
+      if (!adminToken.value) return;
+      const requestSequence = ++logRequestSequence;
       logsLoading.value = true;
       logPage.offset = Math.max(0, offset);
       try {
         const page = await api(`logs?${logQuery()}`);
+        if (requestSequence !== logRequestSequence) return;
         logs.value = page?.items || [];
         logPage.total = Number(page?.total || 0);
         logPage.limit = Number(page?.limit || logPage.limit);
         logPage.offset = Number(page?.offset || 0);
       } catch (error) {
-        refreshError.value = error?.message || t('error.refresh');
+        if (requestSequence === logRequestSequence) {
+          refreshError.value = error?.message || t('error.refresh');
+        }
       } finally {
-        logsLoading.value = false;
+        if (requestSequence === logRequestSequence) {
+          logsLoading.value = false;
+        }
       }
     };
 
@@ -299,6 +306,8 @@ createApp({
       gatewayKeys.value = [];
       balances.value = [];
       balanceResults.value = [];
+      logRequestSequence += 1;
+      logsLoading.value = false;
       logs.value = [];
       routing.value = {};
       snippets.value = {};
@@ -328,7 +337,10 @@ createApp({
     };
 
     const syncSectionFromHash = () => {
-      activeSection.value = sectionFromHash();
+      const next = sectionFromHash();
+      if (next === activeSection.value) return;
+      activeSection.value = next;
+      if (next === 'logs') loadLogs(0);
     };
 
     const toggleTheme = () => {
@@ -349,25 +361,33 @@ createApp({
 
     const pretty = (value) => JSON.stringify(value || {}, null, 2);
 
-    const singaporeTimeFormatter = new Intl.DateTimeFormat('en-CA', {
-      timeZone: 'Asia/Singapore',
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-      hourCycle: 'h23',
-    });
+    const timeFormatters = new Map();
+    const gatewayTimezone = () => dashboard.value?.service?.timezone || 'Asia/Singapore';
+    const gatewayTimeFormatter = () => {
+      const timezone = gatewayTimezone();
+      if (!timeFormatters.has(timezone)) {
+        timeFormatters.set(timezone, new Intl.DateTimeFormat('en-CA', {
+          timeZone: timezone,
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit',
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+          hourCycle: 'h23',
+        }));
+      }
+      return timeFormatters.get(timezone);
+    };
 
-    const formatSingaporeTime = (value) => {
+    const formatGatewayTime = (value) => {
       if (!value) return '-';
       const date = value instanceof Date ? value : new Date(value);
       if (Number.isNaN(date.getTime())) return value;
       const parts = Object.fromEntries(
-        singaporeTimeFormatter.formatToParts(date).map((part) => [part.type, part.value])
+        gatewayTimeFormatter().formatToParts(date).map((part) => [part.type, part.value])
       );
-      return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}:${parts.second} UTC+8`;
+      return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}:${parts.second} ${gatewayTimezone()}`;
     };
 
     const formatShortTime = (value) => {
@@ -375,7 +395,7 @@ createApp({
       const date = value instanceof Date ? value : new Date(value);
       if (Number.isNaN(date.getTime())) return '-';
       const parts = Object.fromEntries(
-        singaporeTimeFormatter.formatToParts(date).map((part) => [part.type, part.value])
+        gatewayTimeFormatter().formatToParts(date).map((part) => [part.type, part.value])
       );
       return `${parts.hour}:${parts.minute}:${parts.second}`;
     };
@@ -929,10 +949,13 @@ createApp({
     onMounted(async () => {
       setLang(lang.value);
       setTheme(theme.value);
-      syncSectionFromHash();
+      activeSection.value = sectionFromHash();
       window.addEventListener('hashchange', syncSectionFromHash);
       window.addEventListener('popstate', syncSectionFromHash);
       await refresh();
+      if (activeSection.value === 'logs') {
+        await loadLogs(0);
+      }
     });
 
     onUnmounted(() => {
@@ -958,7 +981,7 @@ createApp({
       createGatewayKey,
       createdGatewayKey,
       formError,
-      formatSingaporeTime,
+      formatGatewayTime,
       formatShortTime,
       logModelLabel,
       logProtocolLabel,

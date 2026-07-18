@@ -628,7 +628,9 @@ func TestDashboardReturnsCompleteBootstrapPayload(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = st.Close() })
 
-	svc := New(st, config.Default())
+	cfg := config.Default()
+	cfg.Storage.Timezone = "America/New_York"
+	svc := New(st, cfg)
 	req := httptest.NewRequest(http.MethodGet, "http://localhost:18787/admin/api/dashboard", nil)
 	req.Host = "localhost:18787"
 	req.Header.Set("X-Admin-Token", config.Default().Server.AdminToken)
@@ -646,5 +648,14 @@ func TestDashboardReturnsCompleteBootstrapPayload(t *testing.T) {
 		if _, ok := payload[field]; !ok {
 			t.Errorf("dashboard payload missing %q", field)
 		}
+	}
+	var service struct {
+		Timezone string `json:"timezone"`
+	}
+	if err := json.Unmarshal(payload["service"], &service); err != nil {
+		t.Fatal(err)
+	}
+	if service.Timezone != cfg.Storage.Timezone {
+		t.Fatalf("service timezone = %q, want %q", service.Timezone, cfg.Storage.Timezone)
 	}
 }

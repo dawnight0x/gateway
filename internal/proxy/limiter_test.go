@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -81,6 +82,23 @@ func TestRequestLimiterCanUseIdleAlternateKey(t *testing.T) {
 		t.Fatal("idle alternate key was ignored")
 	}
 	releaseIdle()
+}
+
+func TestRequestLimiterEvictsIdleProviderAndKeyEntries(t *testing.T) {
+	limiter := newRequestLimiter(4, 2, 1)
+	for index := range 1_000 {
+		id := fmt.Sprintf("item-%d", index)
+		release, ok := limiter.tryAcquire(id, id)
+		if !ok {
+			t.Fatalf("request %d was not admitted", index)
+		}
+		release()
+	}
+	limiter.mu.Lock()
+	defer limiter.mu.Unlock()
+	if len(limiter.providers) != 0 || len(limiter.keys) != 0 {
+		t.Fatalf("idle limiter entries remain: providers=%d keys=%d", len(limiter.providers), len(limiter.keys))
+	}
 }
 
 func BenchmarkRequestLimiterParallel(b *testing.B) {

@@ -408,7 +408,7 @@
                   <td :class="balanceValueClass(b)">{{ displayBalanceValue(b) }}</td>
                   <td><span :class="['pill', balanceStatusClass(b)]">{{ balanceStatusText(b.status) }}</span></td>
                   <td>{{ b.error || '-' }}</td>
-                  <td>{{ formatSingaporeTime(b.refreshedAt || b.updatedAt) }}</td>
+                  <td>{{ formatGatewayTime(b.refreshedAt || b.updatedAt) }}</td>
                 </tr>
                 <tr v-if="!balances.length">
                   <td colspan="6">
@@ -463,7 +463,7 @@
                   <td>{{ k.name }}</td>
                   <td><code class="key-hint">{{ k.keyHint }}</code></td>
                   <td>{{ k.requestCount }}</td>
-                  <td>{{ formatSingaporeTime(k.lastUsedAt) }}</td>
+                  <td>{{ formatGatewayTime(k.lastUsedAt) }}</td>
                   <td>
                     <span :class="['pill', k.enabled ? 'ok' : 'bad']">{{ k.enabled ? t('status.enabled') : t('status.disabled') }}</span>
                   </td>
@@ -551,7 +551,7 @@
       <section v-show="activeSection === 'setup'" class="section">
         <article class="panel">
           <div class="panel-title section-actions">
-            <button class="ghost" type="button" @click="activeSection = 'providers'">{{ t('action.backProviders') }}</button>
+            <button class="ghost" type="button" @click="setActiveSection('providers')">{{ t('action.backProviders') }}</button>
           </div>
           <div class="flow-hint">
             <strong>{{ t('setup.title') }}</strong>
@@ -596,7 +596,7 @@
               <thead><tr><th>{{ t('table.time') }}</th><th>{{ t('table.protocol') }}</th><th>{{ t('table.model') }}</th><th>{{ t('table.provider') }}</th><th>Key</th><th>{{ t('table.status') }}</th><th>Tokens</th><th>{{ t('table.latency') }}</th><th>{{ t('table.error') }}</th></tr></thead>
               <tbody>
                 <tr v-for="log in logs" :key="log.id">
-                  <td>{{ formatSingaporeTime(log.createdAt) }}</td>
+                  <td>{{ formatGatewayTime(log.createdAt) }}</td>
                   <td>{{ log.inboundProtocol }}</td>
                   <td>{{ log.model || '-' }}</td>
                   <td>{{ log.providerId || '-' }}</td>

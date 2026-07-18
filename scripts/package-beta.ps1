@@ -1,11 +1,23 @@
 param(
   [string]$OutputRoot = "E:\gateway-beta",
-  [string]$Version = "0.6.0",
-  [string]$PackageName = "gateway-beta6"
+  [string]$Version = "",
+  [string]$PackageName = ""
 )
 
 $ErrorActionPreference = "Stop"
 $Root = [System.IO.Path]::GetFullPath((Split-Path -Parent $PSScriptRoot))
+$ReleaseMetadataPath = Join-Path $Root "release.json"
+try {
+  $ReleaseMetadata = Get-Content -Raw -LiteralPath $ReleaseMetadataPath | ConvertFrom-Json -ErrorAction Stop
+} catch {
+  throw "read release metadata $ReleaseMetadataPath`: $($_.Exception.Message)"
+}
+if ([string]::IsNullOrWhiteSpace($Version)) {
+  $Version = [string]$ReleaseMetadata.version
+}
+if ([string]::IsNullOrWhiteSpace($PackageName)) {
+  $PackageName = [string]$ReleaseMetadata.packageName
+}
 $OutputRoot = [System.IO.Path]::GetFullPath($OutputRoot).TrimEnd('\')
 $outputLeaf = [System.IO.Path]::GetFileName($OutputRoot)
 if ([string]::IsNullOrWhiteSpace($outputLeaf) -or $OutputRoot -eq [System.IO.Path]::GetPathRoot($OutputRoot)) {
@@ -85,6 +97,14 @@ function Invoke-GoBuild([string]$GOOS, [string]$GOARCH, [string]$Package, [strin
 try {
   Push-Location $Root
   try {
+    npm ci
+    if ($LASTEXITCODE -ne 0) {
+      throw "admin dependency installation failed"
+    }
+    npm run test:admin
+    if ($LASTEXITCODE -ne 0) {
+      throw "admin tests failed"
+    }
     npm run build:admin
     if ($LASTEXITCODE -ne 0) {
       throw "admin build failed"

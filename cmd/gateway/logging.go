@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"io"
 	"log/slog"
 	"os"
@@ -49,6 +50,9 @@ func newRotatingLogWriter(path string, maxBytes int64, maxBackups int) (*rotatin
 func (w *rotatingLogWriter) Write(p []byte) (int, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	if w.file == nil {
+		return 0, os.ErrClosed
+	}
 	if w.maxBytes > 0 {
 		info, err := w.file.Stat()
 		if err != nil {
@@ -74,10 +78,21 @@ func (w *rotatingLogWriter) Close() error {
 	return err
 }
 
-func (w *rotatingLogWriter) rotateLocked() error {
+func (w *rotatingLogWriter) rotateLocked() (rotateErr error) {
 	if err := w.file.Close(); err != nil {
 		return err
 	}
+	w.file = nil
+	defer func() {
+		if rotateErr == nil || w.file != nil {
+			return
+		}
+		file, reopenErr := os.OpenFile(w.path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+		if reopenErr == nil {
+			w.file = file
+		}
+		rotateErr = errors.Join(rotateErr, reopenErr)
+	}()
 	for index := w.maxBackups - 1; index >= 1; index-- {
 		source := w.path + "." + strconv.Itoa(index)
 		target := w.path + "." + strconv.Itoa(index+1)

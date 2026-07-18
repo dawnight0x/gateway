@@ -179,6 +179,20 @@ func WaitHealthy(healthURL string, attempts int, delay time.Duration) bool {
 	return false
 }
 
+func WaitForProcessExit(pid int, timeout time.Duration) bool {
+	if pid <= 0 || !processAlive(pid) {
+		return true
+	}
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		time.Sleep(50 * time.Millisecond)
+		if !processAlive(pid) {
+			return true
+		}
+	}
+	return !processAlive(pid)
+}
+
 func OpenBrowser(rawURL string) error {
 	switch runtime.GOOS {
 	case "windows":

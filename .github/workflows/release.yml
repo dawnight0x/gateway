@@ -4,16 +4,55 @@ on:
   push:
     tags: ["v[0-9]*", "[0-9]*"]
 
-env:
-  PACKAGE_NAME: gateway-beta6
-
 permissions:
   contents: write
   id-token: write
   attestations: write
 
 jobs:
+  metadata:
+    runs-on: ubuntu-latest
+    outputs:
+      release_version: ${{ steps.release.outputs.release_version }}
+      windows_major: ${{ steps.release.outputs.windows_major }}
+      windows_minor: ${{ steps.release.outputs.windows_minor }}
+      windows_patch: ${{ steps.release.outputs.windows_patch }}
+      package_name: ${{ steps.release.outputs.package_name }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: release
+        name: Validate release metadata
+        shell: pwsh
+        run: |
+          $metadata = Get-Content -Raw release.json | ConvertFrom-Json
+          $versionMatch = [regex]::Match([string]$metadata.version, '^v?(?<major>0|[1-9][0-9]*)\.(?<minor>0|[1-9][0-9]*)\.(?<patch>0|[1-9][0-9]*)$')
+          $tagMatch = [regex]::Match("${{ github.ref_name }}", '^v?(?<major>0|[1-9][0-9]*)\.(?<minor>0|[1-9][0-9]*)\.(?<patch>0|[1-9][0-9]*)$')
+          if (-not $versionMatch.Success -or -not $tagMatch.Success) {
+            throw "release metadata and tag must use major.minor.patch format"
+          }
+          $version = "$($versionMatch.Groups['major'].Value).$($versionMatch.Groups['minor'].Value).$($versionMatch.Groups['patch'].Value)"
+          $tagVersion = "$($tagMatch.Groups['major'].Value).$($tagMatch.Groups['minor'].Value).$($tagMatch.Groups['patch'].Value)"
+          if ($version -ne $tagVersion) {
+            throw "release tag $tagVersion does not match release metadata version $version"
+          }
+          $packageName = [string]$metadata.packageName
+          if ($packageName -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]*$') {
+            throw "release package name contains unsupported characters"
+          }
+          "release_version=$version" >> $env:GITHUB_OUTPUT
+          "windows_major=$($versionMatch.Groups['major'].Value)" >> $env:GITHUB_OUTPUT
+          "windows_minor=$($versionMatch.Groups['minor'].Value)" >> $env:GITHUB_OUTPUT
+          "windows_patch=$($versionMatch.Groups['patch'].Value)" >> $env:GITHUB_OUTPUT
+          "package_name=$packageName" >> $env:GITHUB_OUTPUT
+
   build:
+    needs: metadata
+    env:
+      RELEASE_VERSION: ${{ needs.metadata.outputs.release_version }}
+      WINDOWS_MAJOR: ${{ needs.metadata.outputs.windows_major }}
+      WINDOWS_MINOR: ${{ needs.metadata.outputs.windows_minor }}
+      WINDOWS_PATCH: ${{ needs.metadata.outputs.windows_patch }}
+      PACKAGE_NAME: ${{ needs.metadata.outputs.package_name }}
     strategy:
       fail-fast: false
       matrix:
@@ -41,18 +80,7 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - name: Normalize release version
-        shell: pwsh
-        run: |
-          $match = [regex]::Match("${{ github.ref_name }}", '^v?(?<major>0|[1-9][0-9]*)\.(?<minor>0|[1-9][0-9]*)\.(?<patch>0|[1-9][0-9]*)$')
-          if (-not $match.Success) {
-            throw "release tag must use major.minor.patch format"
-          }
-          "RELEASE_VERSION=$($match.Groups['major'].Value).$($match.Groups['minor'].Value).$($match.Groups['patch'].Value)" >> $env:GITHUB_ENV
-          "WINDOWS_MAJOR=$($match.Groups['major'].Value)" >> $env:GITHUB_ENV
-          "WINDOWS_MINOR=$($match.Groups['minor'].Value)" >> $env:GITHUB_ENV
-          "WINDOWS_PATCH=$($match.Groups['patch'].Value)" >> $env:GITHUB_ENV
-      - run: npm ci && npm run build:admin
+      - run: npm ci && npm run test:admin && npm run build:admin
       - run: git diff --exit-code -- web/admin/index.html web/admin/assets/render.js web/admin/assets/vendor/vue.runtime.global.prod.js
       - name: Stamp Windows version resource
         if: matrix.goos == 'windows'
@@ -115,8 +143,10 @@ jobs:
           if-no-files-found: error
 
   publish:
-    needs: build
+    needs: [metadata, build]
     runs-on: ubuntu-latest
+    env:
+      PACKAGE_NAME: ${{ needs.metadata.outputs.package_name }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4

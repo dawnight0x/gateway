@@ -159,6 +159,7 @@ Copy-Item config.example.yaml config.yaml
 
 ```powershell
 npm ci
+npm run test:admin
 npm run build:admin
 ```
 
@@ -169,6 +170,8 @@ npm run build:admin
 ```powershell
 .\.tools\go\bin\go.exe test ./...
 ```
+
+发布版本号和包名统一维护在 `release.json`。本地打包脚本默认读取该文件，发布标签必须与其中的版本号一致。
 
 完整本地烟测：
 
