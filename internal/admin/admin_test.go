@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"local-ai-gateway/internal/config"
@@ -430,6 +431,196 @@ func TestAdminTestsNewAPIKeyViaModelsEndpoint(t *testing.T) {
 	}
 }
 
+func TestAdminRefreshesProviderModelsWithoutTokenProbeAndRetainsInventoryOnEmptyResult(t *testing.T) {
+	var empty atomic.Bool
+	var modelCalls atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/v1/models" {
+			t.Errorf("unexpected discovery request: %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		modelCalls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		if empty.Load() {
+			_, _ = w.Write([]byte(`{"object":"list","data":[]}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"object":"list","data":[{"id":"model-b"},{"id":"model-a"}]}`))
+	}))
+	defer upstream.Close()
+
+	st := testAdminStore(t)
+	ctx := context.Background()
+	_, err := st.UpsertProvider(ctx, model.Provider{ID: "provider", Name: "provider", Type: model.ProviderOpenAICompatible, BaseURL: upstream.URL + "/v1", Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.UpsertKey(ctx, model.Key{ID: "key", ProviderID: "provider", Name: "key", Secret: "secret", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	svc := New(st, config.Default())
+
+	res := authorizedAdminRequest(t, svc, http.MethodPost, "/admin/api/providers/provider/models", `{}`)
+	if res.Code != http.StatusOK {
+		t.Fatalf("refresh status = %d, body = %s", res.Code, res.Body.String())
+	}
+	var result keyTestResult
+	if err := json.NewDecoder(res.Body).Decode(&result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "ok" || result.TokenStatus != "" || len(result.Models) != 2 || modelCalls.Load() != 1 {
+		t.Fatalf("discovery result = %#v, calls = %d", result, modelCalls.Load())
+	}
+
+	empty.Store(true)
+	res = authorizedAdminRequest(t, svc, http.MethodPost, "/admin/api/providers/provider/models", `{}`)
+	if err := json.NewDecoder(res.Body).Decode(&result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "empty" || result.ConnectionStatus != "ok" || result.Error == "" || modelCalls.Load() != 2 {
+		t.Fatalf("empty discovery result = %#v, calls = %d", result, modelCalls.Load())
+	}
+	inventory, err := st.ListProviderModels(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := inventory["provider"]; len(got) != 2 || got[0] != "model-a" || got[1] != "model-b" {
+		t.Fatalf("retained inventory = %#v", got)
+	}
+}
+
+func TestAdminModelRouteCRUDAndValidation(t *testing.T) {
+	st := testAdminStore(t)
+	ctx := context.Background()
+	for _, provider := range []model.Provider{
+		{ID: "high", Name: "high", Type: model.ProviderOpenAICompatible, BaseURL: "https://high.example", Priority: 100, Enabled: true},
+		{ID: "low", Name: "low", Type: model.ProviderOpenAICompatible, BaseURL: "https://low.example", Priority: 1, Enabled: true},
+	} {
+		if _, err := st.UpsertProvider(ctx, provider); err != nil {
+			t.Fatal(err)
+		}
+	}
+	svc := New(st, config.Default())
+	body := `{
+		"id":"coding-auto","name":"Coding","enabled":true,
+		"models":[
+			{"name":"fallback","priority":10,"enabled":true,"targets":[{"providerId":"low","upstreamModel":"fallback","enabled":true}]},
+			{"name":"primary","priority":100,"enabled":true,"targets":[
+				{"providerId":"low","upstreamModel":"low-primary","enabled":true},
+				{"providerId":"high","upstreamModel":"high-primary","enabled":true}
+			]}
+		]
+	}`
+	res := authorizedAdminRequest(t, svc, http.MethodPost, "/admin/api/model-routes", body)
+	if res.Code != http.StatusOK {
+		t.Fatalf("create route status = %d, body = %s", res.Code, res.Body.String())
+	}
+	var route model.ModelRoute
+	if err := json.NewDecoder(res.Body).Decode(&route); err != nil {
+		t.Fatal(err)
+	}
+	if len(route.Models) != 2 || route.Models[0].Name != "primary" || route.Models[0].Targets[0].ProviderID != "high" {
+		t.Fatalf("saved route = %#v", route)
+	}
+
+	res = authorizedAdminRequest(t, svc, http.MethodGet, "/admin/api/model-routes/coding-auto", "")
+	if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), `"upstreamModel":"high-primary"`) {
+		t.Fatalf("get route status = %d, body = %s", res.Code, res.Body.String())
+	}
+	res = authorizedAdminRequest(t, svc, http.MethodPost, "/admin/api/model-routes", `{"id":"invalid","enabled":true,"models":[{"name":"primary","priority":1,"enabled":true,"targets":[{"providerId":"missing","upstreamModel":"model","enabled":true}]}]}`)
+	if res.Code != http.StatusBadRequest || !strings.Contains(res.Body.String(), "does not exist") {
+		t.Fatalf("missing provider validation status = %d, body = %s", res.Code, res.Body.String())
+	}
+	res = authorizedAdminRequest(t, svc, http.MethodDelete, "/admin/api/model-routes/coding-auto", "")
+	if res.Code != http.StatusOK {
+		t.Fatalf("delete route status = %d, body = %s", res.Code, res.Body.String())
+	}
+	res = authorizedAdminRequest(t, svc, http.MethodGet, "/admin/api/model-routes/coding-auto", "")
+	if res.Code != http.StatusNotFound {
+		t.Fatalf("deleted route status = %d, body = %s", res.Code, res.Body.String())
+	}
+}
+
+func TestValidatePriorityRange(t *testing.T) {
+	for _, test := range []struct {
+		priority int
+		valid    bool
+	}{
+		{priority: -1, valid: false},
+		{priority: 0, valid: true},
+		{priority: 1000, valid: true},
+		{priority: 1001, valid: false},
+	} {
+		err := validatePriority("test", test.priority)
+		if (err == nil) != test.valid {
+			t.Errorf("validatePriority(%d) error = %v, valid = %t", test.priority, err, test.valid)
+		}
+	}
+}
+
+func TestAdminRejectsOutOfRangePriorities(t *testing.T) {
+	st := testAdminStore(t)
+	svc := New(st, config.Default())
+
+	res := authorizedAdminRequest(t, svc, http.MethodPost, "/admin/api/providers", `{
+		"id":"negative-provider","name":"Negative","type":"openai-compatible",
+		"baseUrl":"https://negative.example","priority":-1
+	}`)
+	if res.Code != http.StatusBadRequest || !strings.Contains(res.Body.String(), "provider priority") {
+		t.Fatalf("negative provider priority status = %d, body = %s", res.Code, res.Body.String())
+	}
+	res = authorizedAdminRequest(t, svc, http.MethodPost, "/admin/api/providers", `{
+		"id":"high-provider","name":"High","type":"openai-compatible",
+		"baseUrl":"https://high.example","priority":1001
+	}`)
+	if res.Code != http.StatusBadRequest || !strings.Contains(res.Body.String(), "provider priority") {
+		t.Fatalf("high provider priority status = %d, body = %s", res.Code, res.Body.String())
+	}
+
+	ctx := context.Background()
+	if _, err := st.UpsertProvider(ctx, model.Provider{
+		ID: "provider", Name: "Provider", Type: model.ProviderOpenAICompatible,
+		BaseURL: "https://provider.example", Enabled: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	res = authorizedAdminRequest(t, svc, http.MethodPost, "/admin/api/keys", `{
+		"id":"negative-key","providerId":"provider","name":"Negative",
+		"secret":"secret","priority":-1,"enabled":true
+	}`)
+	if res.Code != http.StatusBadRequest || !strings.Contains(res.Body.String(), "key priority") {
+		t.Fatalf("negative key priority status = %d, body = %s", res.Code, res.Body.String())
+	}
+	res = authorizedAdminRequest(t, svc, http.MethodPost, "/admin/api/keys", `{
+		"id":"high-key","providerId":"provider","name":"High",
+		"secret":"secret","priority":1001,"enabled":true
+	}`)
+	if res.Code != http.StatusBadRequest || !strings.Contains(res.Body.String(), "key priority") {
+		t.Fatalf("high key priority status = %d, body = %s", res.Code, res.Body.String())
+	}
+
+	res = authorizedAdminRequest(t, svc, http.MethodPost, "/admin/api/model-routes", `{
+		"id":"negative-route","enabled":true,"models":[{
+			"name":"fallback","priority":-1,"enabled":true,
+			"targets":[{"providerId":"provider","upstreamModel":"fallback","enabled":true}]
+		}]
+	}`)
+	if res.Code != http.StatusBadRequest || !strings.Contains(res.Body.String(), "route model priority") {
+		t.Fatalf("negative route model priority status = %d, body = %s", res.Code, res.Body.String())
+	}
+	res = authorizedAdminRequest(t, svc, http.MethodPost, "/admin/api/model-routes", `{
+		"id":"high-route","enabled":true,"models":[{
+			"name":"fallback","priority":1001,"enabled":true,
+			"targets":[{"providerId":"provider","upstreamModel":"fallback","enabled":true}]
+		}]
+	}`)
+	if res.Code != http.StatusBadRequest || !strings.Contains(res.Body.String(), "route model priority") {
+		t.Fatalf("high route model priority status = %d, body = %s", res.Code, res.Body.String())
+	}
+}
+
 func TestAdminPatchesProviderAndKeyForEditing(t *testing.T) {
 	dir := t.TempDir()
 	st, err := store.Open(filepath.Join(dir, "gateway.db"), filepath.Join(dir, "secret.key"))
@@ -630,6 +821,19 @@ func TestDashboardReturnsCompleteBootstrapPayload(t *testing.T) {
 
 	cfg := config.Default()
 	cfg.Storage.Timezone = "America/New_York"
+	ctx := context.Background()
+	if _, err := st.UpsertProvider(ctx, model.Provider{ID: "persisted", Name: "persisted", Type: model.ProviderOpenAICompatible, BaseURL: "https://example.test", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.ReplaceProviderModels(ctx, "persisted", []string{"model-a"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.RecordProviderModelDiscoverySuccess(ctx, "persisted", 1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.UpsertModelRoute(ctx, model.ModelRoute{ID: "logical-model", Name: "Logical", Enabled: true, Models: []model.ModelRouteModel{{Name: "model-a", Priority: 100, Enabled: true, Targets: []model.ModelRouteTarget{{ProviderID: "persisted", UpstreamModel: "model-a", Enabled: true}}}}}); err != nil {
+		t.Fatal(err)
+	}
 	svc := New(st, cfg)
 	req := httptest.NewRequest(http.MethodGet, "http://localhost:18787/admin/api/dashboard", nil)
 	req.Host = "localhost:18787"
@@ -644,7 +848,7 @@ func TestDashboardReturnsCompleteBootstrapPayload(t *testing.T) {
 	if err := json.NewDecoder(res.Body).Decode(&payload); err != nil {
 		t.Fatal(err)
 	}
-	for _, field := range []string{"service", "stats", "providers", "keys", "gatewayKeys", "balances", "logs", "routing", "snippets"} {
+	for _, field := range []string{"service", "stats", "providers", "keys", "gatewayKeys", "balances", "logs", "providerModels", "modelDiscovery", "modelRoutes", "modelStates", "routing", "snippets"} {
 		if _, ok := payload[field]; !ok {
 			t.Errorf("dashboard payload missing %q", field)
 		}
@@ -657,5 +861,19 @@ func TestDashboardReturnsCompleteBootstrapPayload(t *testing.T) {
 	}
 	if service.Timezone != cfg.Storage.Timezone {
 		t.Fatalf("service timezone = %q, want %q", service.Timezone, cfg.Storage.Timezone)
+	}
+	var providerModels map[string][]string
+	if err := json.Unmarshal(payload["providerModels"], &providerModels); err != nil {
+		t.Fatal(err)
+	}
+	if got := providerModels["persisted"]; len(got) != 1 || got[0] != "model-a" {
+		t.Fatalf("provider models = %#v", providerModels)
+	}
+	var routes []model.ModelRoute
+	if err := json.Unmarshal(payload["modelRoutes"], &routes); err != nil {
+		t.Fatal(err)
+	}
+	if len(routes) != 1 || routes[0].ID != "logical-model" {
+		t.Fatalf("model routes = %#v", routes)
 	}
 }

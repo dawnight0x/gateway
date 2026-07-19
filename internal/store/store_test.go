@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -627,5 +628,76 @@ func TestRequestLogBufferDropsOldestEntriesWhenFull(t *testing.T) {
 	}
 	if dropped := st.droppedRequestLogs.Load(); dropped != 17 {
 		t.Fatalf("dropped logs = %d, want 17", dropped)
+	}
+}
+
+func TestProviderModelInventoryPersistsAndDiscoveryFailureRetainsLastSuccess(t *testing.T) {
+	st := openTestStore(t, Options{Timezone: "Asia/Singapore"})
+	ctx := context.Background()
+	if _, err := st.UpsertProvider(ctx, model.Provider{ID: "inventory", Name: "inventory", Type: model.ProviderOpenAICompatible, BaseURL: "https://example.test", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.ReplaceProviderModels(ctx, "inventory", []string{"model-b", "model-a", "model-a"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.RecordProviderModelDiscoverySuccess(ctx, "inventory", 2); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.RecordProviderModelDiscoveryFailure(ctx, "inventory", "network_error", "temporary outage"); err != nil {
+		t.Fatal(err)
+	}
+
+	inventory, err := st.ListProviderModels(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := inventory["inventory"]; len(got) != 2 || got[0] != "model-a" || got[1] != "model-b" {
+		t.Fatalf("inventory = %#v", got)
+	}
+	discoveries, err := st.ListProviderModelDiscoveries(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := discoveries["inventory"]
+	if state.Status != "network_error" || state.ModelCount != 2 || state.LastSuccessAt == nil || state.LastError != "temporary outage" {
+		t.Fatalf("discovery state = %#v", state)
+	}
+}
+
+func TestModelRouteRoundTripPreservesModelAndProviderPriorityOrder(t *testing.T) {
+	st := openTestStore(t, Options{Timezone: "Asia/Singapore"})
+	ctx := context.Background()
+	for _, provider := range []model.Provider{
+		{ID: "high", Name: "high", Type: model.ProviderOpenAICompatible, BaseURL: "https://high.test", Priority: 10, Enabled: true},
+		{ID: "low", Name: "low", Type: model.ProviderOpenAICompatible, BaseURL: "https://low.test", Priority: 1, Enabled: true},
+	} {
+		if _, err := st.UpsertProvider(ctx, provider); err != nil {
+			t.Fatal(err)
+		}
+	}
+	route, err := st.UpsertModelRoute(ctx, model.ModelRoute{
+		ID: "coding-auto", Name: "Coding", Enabled: true,
+		Models: []model.ModelRouteModel{
+			{Name: "fallback", Priority: 20, Enabled: true, Targets: []model.ModelRouteTarget{{ProviderID: "low", UpstreamModel: "fallback", Enabled: true}}},
+			{Name: "primary", Priority: 100, Enabled: true, Targets: []model.ModelRouteTarget{
+				{ProviderID: "low", UpstreamModel: "primary", Enabled: true},
+				{ProviderID: "high", UpstreamModel: "primary", Enabled: true},
+			}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(route.Models) != 2 || route.Models[0].Name != "primary" || route.Models[1].Name != "fallback" {
+		t.Fatalf("route models = %#v", route.Models)
+	}
+	if got := route.Models[0].Targets; len(got) != 2 || got[0].ProviderID != "high" || got[1].ProviderID != "low" {
+		t.Fatalf("primary targets = %#v", got)
+	}
+	if err := st.DeleteModelRoute(ctx, route.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.GetModelRoute(ctx, route.ID); err != sql.ErrNoRows {
+		t.Fatalf("deleted route error = %v", err)
 	}
 }

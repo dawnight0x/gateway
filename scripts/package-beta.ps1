@@ -164,7 +164,8 @@ try {
     $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $archive).Hash.ToLowerInvariant()
     "$hash  $([System.IO.Path]::GetFileName($archive))"
   }
-  $archiveLines | Set-Content -LiteralPath $TopChecksums -Encoding ascii
+  $archiveText = if ($archiveLines.Count -gt 0) { ($archiveLines -join "`n") + "`n" } else { "" }
+  [System.IO.File]::WriteAllText($TopChecksums, $archiveText, [System.Text.Encoding]::ASCII)
 
   Get-ChildItem -LiteralPath $OutputRoot -File | Where-Object { $_.Name -in @(
     [System.IO.Path]::GetFileName($WinArchive),

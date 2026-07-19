@@ -2,6 +2,8 @@
 
 网关优先使用入站协议对应的上游原生端点。只有 Provider 类型或端点能力不一致时才执行转换。转换目标是保留明确支持的语义，而不是把未知字段静默删除。
 
+启用的逻辑模型路由会先把客户端模型 ID 展开为按优先级排列的实际上游模型和 Provider。转换发生在候选确定之后，因此每次原生请求或协议转换都会使用该候选配置的实际上游模型名。未匹配逻辑路由的请求继续使用 Provider 的 `model_map`；没有映射时保持客户端模型名。
+
 | 入站协议 | 同协议上游 | OpenAI Chat / Responses 互转 | Anthropic / Gemini / OpenAI 跨协议 |
 |---|---|---|---|
 | OpenAI Chat Completions | 原样转发并替换模型名 | 文本、流式、工具调用与结果、多模态内容、JSON Schema、reasoning、usage | 基础文本、system、temperature、top_p、stop；工具和多模态会明确拒绝 |
@@ -27,3 +29,5 @@
 ## 错误行为
 
 发现不支持的跨协议字段时，请求在调用转换端点之前返回 `400 protocol_error`。上游返回无法解析或结构错误的 2xx JSON 时返回 `502 protocol_error`，该 Key 不会被标记为成功。需要完整语义时，应配置同协议 Provider 或让客户端使用上游原生协议。
+
+上游明确返回模型不存在、未启用或无模型权限时归类为 `model_unavailable`，不会误判成端点不支持并触发 Chat/Responses 双端点重试。该错误只影响对应 Provider/模型组合，网关会先尝试同模型的其他 Provider，再进入下一备用模型。

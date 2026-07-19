@@ -39,6 +39,13 @@ routing:
   max_concurrent_per_key: 4
   queue_timeout_milliseconds: 2000
 
+model_discovery:
+  # 创建或更新上游 Key 后自动获取模型列表，并周期刷新已过期的模型库存。
+  enabled: true
+  refresh_interval_hours: 24
+  # 自动发现只读取模型列表，不执行会消耗 Token 的生成测试。
+  timeout_seconds: 30
+
 storage:
   path: data/gateway.db
   secret_path: data/secret.key

@@ -86,11 +86,13 @@ export GEMINI_API_KEY=sk-xxx
 - 本地运行日志：默认写入 `data/gateway.log`，按 10 MiB 轮转并保留 3 个备份。
 - SQLite WAL 本地存储，真实上游 key 使用 AES-256-GCM 加密保存；Windows 使用 DPAPI，Linux 优先使用 Secret Service，macOS 优先使用 Keychain 保护主密钥。无可用系统密钥环时回退到权限为 `0600` 的密钥文件，也可通过 `GATEWAY_MASTER_KEY` 接入外部密钥管理器。
 - 管理 API 鉴权：`/admin/api/*` 需要 `X-Admin-Token` 或 `Authorization: Bearer`，并带有本机 Host/Origin 防护。
-- 本地管理网页：Dashboard、Provider、Key、路由设置、连接向导、最近请求，支持中文 / English 和深色 / 浅色主题切换。
+- 本地管理网页：Dashboard、Provider、模型优先路由、Key、路由设置、连接向导、最近请求，支持中文 / English 和深色 / 浅色主题切换。
 - Provider 类型：`openai-compatible`、`anthropic-compatible`、`gemini-compatible`、`new-api`、`sub2api`、`custom`。
 - 代理接口：`/health`、`/status`、`/metrics`、`/v1/models`、`/v1/chat/completions`、`/v1/responses`、`/v1/messages`、`/messages`、`/v1beta/models/{model}:generateContent`、`/v1beta/models/{model}:streamGenerateContent`。
 - 代理请求会严格校验 JSON 和 `model`，响应通过 `X-Gateway-Request-ID` 提供可关联到本地请求日志的 ID；客户端主动取消不会计入上游 Key 失败或触发冷却。
-- 路由：首选 key、provider/key 稳定优先级、连续失败阈值、恢复探测冷却、Retry-After。
+- 模型发现：添加或更新上游 Key 后自动读取 `/models` 并持久保存模型库存，默认每 24 小时刷新；自动任务不会发起消耗 Token 的生成请求，发现失败或返回空列表时保留上次成功库存。
+- 模型优先路由：客户端请求逻辑模型 ID 后，先按模型优先级，再按 Provider 优先级，最后按 Key 顺序尝试；当前模型的所有候选不可用后才进入下一备用模型。未配置逻辑模型时继续使用原有 `model_map` 和 Key 路由。
+- 路由健康：模型不存在/无权限只冷却对应的 `(Provider, 上游模型)`；鉴权、限流和网络类错误继续作用于 Key；恢复探测、连续失败阈值和 `Retry-After` 规则保持有效。
 - 安全失败切换：401/403、429 等明确失败可切换到下一个 Key；网络错误、5xx、空 2xx 与流中断可能已在上游执行，默认不跨 Key 重试，避免重复生成和重复计费。仅在显式开启 `routing.retry_ambiguous_errors` 后恢复此类重试。
 - 恢复探测：高优先级 key 首次达到失败阈值后 60 秒重试；仍失败则按 `cooldown_seconds`（默认 300 秒）继续探测，成功后自动回到高优先级 key。
 - OpenAI 原生协议优先：`/v1/responses` 与 `/v1/chat/completions` 分别原样请求上游同名端点；仅在上游明确返回端点不支持时自动执行双向协议转换。
@@ -147,11 +149,22 @@ Copy-Item config.example.yaml config.yaml
 - `GATEWAY_MAX_CONCURRENT_PER_PROVIDER`
 - `GATEWAY_MAX_CONCURRENT_PER_KEY`
 - `GATEWAY_QUEUE_TIMEOUT_MILLISECONDS`
+- `GATEWAY_MODEL_DISCOVERY`
+- `GATEWAY_MODEL_DISCOVERY_REFRESH_HOURS`
+- `GATEWAY_MODEL_DISCOVERY_TIMEOUT_SECONDS`
 - `GATEWAY_OPEN_BROWSER_ON_DUPLICATE`
 - `GATEWAY_TRAY`
 - `GATEWAY_WORKDIR`
 
 远程监听、备份恢复、主密钥轮换和故障处置见 [运维指南](docs/operations.md)。
+
+## 模型发现与优先路由
+
+1. 在 Provider 页面添加 URL 和 Key。网关会自动获取并保存模型列表，也可以点击“刷新模型”。Key 的“测试”操作会额外执行一次最小生成探针；自动发现和“刷新模型”只读取模型接口。
+2. 在“模型优先路由”页面创建客户端请求的逻辑模型，例如 `coding-auto`，为其添加主模型和备用模型，并在每层选择允许使用的 Provider 与实际模型名。
+3. 客户端请求 `coding-auto` 时，候选顺序为“模型优先级 -> Provider 优先级 -> Key 顺序”。`routing.retry_per_request` 是单次请求的尝试上限；Provider 较多时应按预期故障切换范围调整该值。
+
+逻辑路由只影响与其 ID 完全匹配的请求，不会自动接管未选择的模型。`/v1/models` 会同时返回启用的逻辑模型 ID、显式 `model_map` 名称，以及无映射 Provider 的已发现模型。
 
 ## 管理后台构建
 

@@ -239,6 +239,103 @@ var schemaMigrations = []string{
 		updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 	);
 	CREATE INDEX IF NOT EXISTS idx_upstream_affinity_expires_at ON upstream_affinity(expires_at);`,
+	`CREATE TABLE IF NOT EXISTS provider_model_discovery (
+		provider_id TEXT PRIMARY KEY REFERENCES providers(id) ON DELETE CASCADE,
+		status TEXT NOT NULL DEFAULT 'unknown',
+		model_count INTEGER NOT NULL DEFAULT 0,
+		last_attempt_at TEXT,
+		last_success_at TEXT,
+		last_error TEXT NOT NULL DEFAULT ''
+	);
+
+	CREATE TABLE IF NOT EXISTS model_routes (
+		id TEXT PRIMARY KEY,
+		name TEXT NOT NULL,
+		enabled INTEGER NOT NULL DEFAULT 1,
+		created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+	);
+
+	CREATE TABLE IF NOT EXISTS model_route_models (
+		route_id TEXT NOT NULL REFERENCES model_routes(id) ON DELETE CASCADE,
+		name TEXT NOT NULL,
+		priority INTEGER NOT NULL DEFAULT 0,
+		enabled INTEGER NOT NULL DEFAULT 1,
+		PRIMARY KEY(route_id,name)
+	);
+
+	CREATE TABLE IF NOT EXISTS model_route_targets (
+		route_id TEXT NOT NULL,
+		route_model TEXT NOT NULL,
+		provider_id TEXT NOT NULL REFERENCES providers(id) ON DELETE CASCADE,
+		upstream_model TEXT NOT NULL,
+		enabled INTEGER NOT NULL DEFAULT 1,
+		PRIMARY KEY(route_id,route_model,provider_id,upstream_model),
+		FOREIGN KEY(route_id,route_model) REFERENCES model_route_models(route_id,name) ON DELETE CASCADE
+	);
+	CREATE INDEX IF NOT EXISTS idx_model_route_targets_provider ON model_route_targets(provider_id);
+
+	CREATE TABLE IF NOT EXISTS provider_model_state (
+		provider_id TEXT NOT NULL REFERENCES providers(id) ON DELETE CASCADE,
+		model_id TEXT NOT NULL,
+		consecutive_failures INTEGER NOT NULL DEFAULT 0,
+		cooldown_until TEXT,
+		last_error TEXT NOT NULL DEFAULT '',
+		last_status_code INTEGER,
+		success_count INTEGER NOT NULL DEFAULT 0,
+		failure_count INTEGER NOT NULL DEFAULT 0,
+		last_used_at TEXT,
+		PRIMARY KEY(provider_id,model_id)
+	);
+	CREATE INDEX IF NOT EXISTS idx_provider_model_state_cooldown ON provider_model_state(cooldown_until);
+
+	DROP TABLE IF EXISTS upstream_affinity_v6;
+	CREATE TABLE upstream_affinity_v6 (
+		resource_id TEXT PRIMARY KEY,
+		provider_id TEXT NOT NULL,
+		key_id TEXT NOT NULL REFERENCES keys(id) ON DELETE CASCADE,
+		upstream_model TEXT NOT NULL DEFAULT '',
+		expires_at TEXT NOT NULL,
+		created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+	);
+	INSERT INTO upstream_affinity_v6 (resource_id,provider_id,key_id,expires_at,created_at,updated_at)
+	SELECT resource_id,provider_id,key_id,expires_at,created_at,updated_at FROM upstream_affinity;
+	DROP TABLE upstream_affinity;
+	ALTER TABLE upstream_affinity_v6 RENAME TO upstream_affinity;
+	CREATE INDEX IF NOT EXISTS idx_upstream_affinity_expires_at ON upstream_affinity(expires_at);
+
+	DROP TABLE IF EXISTS request_logs_v6;
+	CREATE TABLE request_logs_v6 (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		request_id TEXT NOT NULL,
+		inbound_protocol TEXT NOT NULL,
+		provider_id TEXT,
+		key_id TEXT,
+		model TEXT,
+		route_id TEXT NOT NULL DEFAULT '',
+		upstream_model TEXT NOT NULL DEFAULT '',
+		attempts INTEGER NOT NULL DEFAULT 0,
+		status INTEGER NOT NULL,
+		latency_ms INTEGER NOT NULL,
+		prompt_tokens INTEGER,
+		completion_tokens INTEGER,
+		total_tokens INTEGER,
+		error_type TEXT NOT NULL DEFAULT '',
+		created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+	);
+	INSERT INTO request_logs_v6 (
+		id,request_id,inbound_protocol,provider_id,key_id,model,status,latency_ms,
+		prompt_tokens,completion_tokens,total_tokens,error_type,created_at
+	)
+	SELECT id,request_id,inbound_protocol,provider_id,key_id,model,status,latency_ms,
+		prompt_tokens,completion_tokens,total_tokens,error_type,created_at
+	FROM request_logs;
+	DROP TABLE request_logs;
+	ALTER TABLE request_logs_v6 RENAME TO request_logs;
+	CREATE INDEX IF NOT EXISTS idx_request_logs_created_at ON request_logs(created_at);
+	CREATE INDEX IF NOT EXISTS idx_request_logs_provider_created_at ON request_logs(provider_id,created_at);
+	CREATE INDEX IF NOT EXISTS idx_request_logs_key_created_at ON request_logs(key_id,created_at);`,
 }
 
 func Open(path, secretPath string) (*Store, error) {
@@ -1175,9 +1272,11 @@ func (s *Store) flushRequestLogs(ctx context.Context) error {
 	}
 	for _, l := range batch {
 		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO request_logs (request_id,inbound_protocol,provider_id,key_id,model,status,latency_ms,prompt_tokens,completion_tokens,total_tokens,error_type,created_at)
-			VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
-		`, l.RequestID, l.InboundProtocol, emptyNil(l.ProviderID), emptyNil(l.KeyID), emptyNil(l.Model), l.Status, l.LatencyMS, l.PromptTokens, l.CompletionTokens, l.TotalTokens, l.ErrorType, l.CreatedAt.UTC().Format("2006-01-02 15:04:05")); err != nil {
+			INSERT INTO request_logs (
+				request_id,inbound_protocol,provider_id,key_id,model,route_id,upstream_model,attempts,
+				status,latency_ms,prompt_tokens,completion_tokens,total_tokens,error_type,created_at
+			) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+		`, l.RequestID, l.InboundProtocol, emptyNil(l.ProviderID), emptyNil(l.KeyID), emptyNil(l.Model), l.RouteID, l.UpstreamModel, l.Attempts, l.Status, l.LatencyMS, l.PromptTokens, l.CompletionTokens, l.TotalTokens, l.ErrorType, l.CreatedAt.UTC().Format("2006-01-02 15:04:05")); err != nil {
 			_ = tx.Rollback()
 			s.restoreRequestLogs(batch)
 			return err
@@ -1313,7 +1412,7 @@ func (s *Store) ListLogs(ctx context.Context, limit int) ([]model.RequestLog, er
 	if err := s.flushRequestLogs(ctx); err != nil {
 		return nil, err
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT id,request_id,inbound_protocol,provider_id,key_id,model,status,latency_ms,prompt_tokens,completion_tokens,total_tokens,error_type,created_at FROM request_logs ORDER BY id DESC LIMIT ?`, limit)
+	rows, err := s.db.QueryContext(ctx, `SELECT id,request_id,inbound_protocol,provider_id,key_id,model,route_id,upstream_model,attempts,status,latency_ms,prompt_tokens,completion_tokens,total_tokens,error_type,created_at FROM request_logs ORDER BY id DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -1321,15 +1420,17 @@ func (s *Store) ListLogs(ctx context.Context, limit int) ([]model.RequestLog, er
 	out := make([]model.RequestLog, 0)
 	for rows.Next() {
 		var l model.RequestLog
-		var providerID, keyID, mod sql.NullString
+		var providerID, keyID, mod, routeID, upstreamModel sql.NullString
 		var pt, ct, tt sql.NullInt64
 		var created string
-		if err := rows.Scan(&l.ID, &l.RequestID, &l.InboundProtocol, &providerID, &keyID, &mod, &l.Status, &l.LatencyMS, &pt, &ct, &tt, &l.ErrorType, &created); err != nil {
+		if err := rows.Scan(&l.ID, &l.RequestID, &l.InboundProtocol, &providerID, &keyID, &mod, &routeID, &upstreamModel, &l.Attempts, &l.Status, &l.LatencyMS, &pt, &ct, &tt, &l.ErrorType, &created); err != nil {
 			return nil, err
 		}
 		l.ProviderID = providerID.String
 		l.KeyID = keyID.String
 		l.Model = mod.String
+		l.RouteID = routeID.String
+		l.UpstreamModel = upstreamModel.String
 		l.PromptTokens = intPtr(pt)
 		l.CompletionTokens = intPtr(ct)
 		l.TotalTokens = intPtr(tt)

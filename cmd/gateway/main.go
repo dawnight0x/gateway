@@ -117,6 +117,8 @@ func run() (runErr error) {
 	rt := router.New(db, cfg.Routing)
 	px := proxy.New(db, rt, cfg)
 	ad := admin.New(db, cfg)
+	stopModelDiscovery := ad.StartModelDiscovery(context.Background())
+	defer stopModelDiscovery()
 
 	mux := http.NewServeMux()
 	ad.Register(mux)

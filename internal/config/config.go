@@ -22,11 +22,12 @@ import (
 )
 
 type Config struct {
-	Server  ServerConfig  `yaml:"server" json:"server"`
-	Routing RoutingConfig `yaml:"routing" json:"routing"`
-	Storage StorageConfig `yaml:"storage" json:"storage"`
-	Logging LoggingConfig `yaml:"logging" json:"logging"`
-	Tray    TrayConfig    `yaml:"tray" json:"tray"`
+	Server         ServerConfig         `yaml:"server" json:"server"`
+	Routing        RoutingConfig        `yaml:"routing" json:"routing"`
+	ModelDiscovery ModelDiscoveryConfig `yaml:"model_discovery" json:"modelDiscovery"`
+	Storage        StorageConfig        `yaml:"storage" json:"storage"`
+	Logging        LoggingConfig        `yaml:"logging" json:"logging"`
+	Tray           TrayConfig           `yaml:"tray" json:"tray"`
 }
 
 type ServerConfig struct {
@@ -60,6 +61,12 @@ type RoutingConfig struct {
 	MaxConcurrentPerProvider   int  `yaml:"max_concurrent_per_provider" json:"maxConcurrentPerProvider"`
 	MaxConcurrentPerKey        int  `yaml:"max_concurrent_per_key" json:"maxConcurrentPerKey"`
 	QueueTimeoutMilliseconds   int  `yaml:"queue_timeout_milliseconds" json:"queueTimeoutMilliseconds"`
+}
+
+type ModelDiscoveryConfig struct {
+	Enabled              bool `yaml:"enabled" json:"enabled"`
+	RefreshIntervalHours int  `yaml:"refresh_interval_hours" json:"refreshIntervalHours"`
+	TimeoutSeconds       int  `yaml:"timeout_seconds" json:"timeoutSeconds"`
 }
 
 type StorageConfig struct {
@@ -111,6 +118,11 @@ func Default() Config {
 			MaxConcurrentPerProvider:   16,
 			MaxConcurrentPerKey:        4,
 			QueueTimeoutMilliseconds:   2000,
+		},
+		ModelDiscovery: ModelDiscoveryConfig{
+			Enabled:              true,
+			RefreshIntervalHours: 24,
+			TimeoutSeconds:       30,
 		},
 		Storage: StorageConfig{
 			Path:                  "data/gateway.db",
@@ -170,6 +182,8 @@ func Load() (Config, error) {
 		{"GATEWAY_MAX_CONCURRENT_PER_PROVIDER", &cfg.Routing.MaxConcurrentPerProvider},
 		{"GATEWAY_MAX_CONCURRENT_PER_KEY", &cfg.Routing.MaxConcurrentPerKey},
 		{"GATEWAY_QUEUE_TIMEOUT_MILLISECONDS", &cfg.Routing.QueueTimeoutMilliseconds},
+		{"GATEWAY_MODEL_DISCOVERY_REFRESH_HOURS", &cfg.ModelDiscovery.RefreshIntervalHours},
+		{"GATEWAY_MODEL_DISCOVERY_TIMEOUT_SECONDS", &cfg.ModelDiscovery.TimeoutSeconds},
 		{"GATEWAY_LOG_RETENTION_DAYS", &cfg.Storage.LogRetentionDays},
 		{"GATEWAY_LOG_MAX_ENTRIES", &cfg.Storage.LogMaxEntries},
 		{"GATEWAY_BACKUP_RETENTION", &cfg.Storage.BackupRetention},
@@ -193,6 +207,7 @@ func Load() (Config, error) {
 		{"GATEWAY_ALLOW_INSECURE_REMOTE", &cfg.Server.AllowInsecureRemote},
 		{"GATEWAY_BACKUP_BEFORE_MIGRATION", &cfg.Storage.BackupBeforeMigration},
 		{"GATEWAY_REQUEST_LOGGING_ENABLED", &cfg.Storage.RequestLoggingEnabled},
+		{"GATEWAY_MODEL_DISCOVERY", &cfg.ModelDiscovery.Enabled},
 	} {
 		if err := overrideBool(item.key, item.dst); err != nil {
 			return cfg, err
@@ -326,6 +341,12 @@ func (c Config) Validate() error {
 	}
 	if c.Routing.QueueTimeoutMilliseconds < 0 {
 		return fmt.Errorf("routing.queue_timeout_milliseconds must be >= 0")
+	}
+	if c.ModelDiscovery.RefreshIntervalHours < 1 {
+		return fmt.Errorf("model_discovery.refresh_interval_hours must be >= 1")
+	}
+	if c.ModelDiscovery.TimeoutSeconds < 1 || c.ModelDiscovery.TimeoutSeconds > 120 {
+		return fmt.Errorf("model_discovery.timeout_seconds must be between 1 and 120")
 	}
 	if c.Storage.LogRetentionDays < 0 {
 		return fmt.Errorf("storage.log_retention_days must be >= 0")

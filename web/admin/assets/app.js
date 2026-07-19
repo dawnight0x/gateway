@@ -2,7 +2,7 @@ const { createApp, computed, onMounted, onUnmounted, reactive, ref } = Vue;
 
 const messages = window.gatewayMessages;
 
-const sectionIDs = ['dashboard', 'providers', 'keys', 'routing', 'setup', 'logs'];
+const sectionIDs = ['dashboard', 'providers', 'model-routing', 'keys', 'routing', 'setup', 'logs'];
 
 createApp({
   render: window.gatewayRender,
@@ -45,6 +45,10 @@ createApp({
     const balanceRefreshing = ref(false);
     const keyTestResults = ref({});
     const providerModels = ref({});
+    const modelDiscovery = ref({});
+    const modelRoutes = ref([]);
+    const modelStates = ref([]);
+    const refreshingProviderId = ref('');
     const testingKeyId = ref('');
     const logs = ref([]);
     const logPage = reactive({ total: 0, limit: 50, offset: 0 });
@@ -71,6 +75,7 @@ createApp({
     }
     const providerFormOpen = ref(false);
     const keyFormOpen = ref(false);
+    const modelRouteFormOpen = ref(false);
     const modelMapExample = '{\n  "gpt-4o": "gpt-4o-mini",\n  "claude-sonnet": "claude-3-5-sonnet-20241022"\n}';
 
     const providerForm = reactive({
@@ -97,6 +102,13 @@ createApp({
       defaultModel: '',
       enabled: true,
     });
+    const modelRouteForm = reactive({
+      editingId: '',
+      id: '',
+      name: '',
+      enabled: true,
+      models: [],
+    });
     const gatewayKeyForm = reactive({ name: '' });
     const createdGatewayKey = ref(null);
     const copyFeedback = ref({});
@@ -105,10 +117,11 @@ createApp({
     const navItems = [
       { id: 'dashboard', label: 'nav.dashboard', icon: '01' },
       { id: 'providers', label: 'nav.providers', icon: '02' },
-      { id: 'keys', label: 'nav.keys', icon: '03' },
-      { id: 'routing', label: 'nav.routing', icon: '04' },
-      { id: 'setup', label: 'nav.setup', icon: '05' },
-      { id: 'logs', label: 'nav.logs', icon: '06' },
+      { id: 'model-routing', label: 'nav.modelRouting', icon: '03' },
+      { id: 'keys', label: 'nav.keys', icon: '04' },
+      { id: 'routing', label: 'nav.routing', icon: '05' },
+      { id: 'setup', label: 'nav.setup', icon: '06' },
+      { id: 'logs', label: 'nav.logs', icon: '07' },
     ];
 
     const providerTypes = [
@@ -209,6 +222,10 @@ createApp({
         gatewayKeys.value = nextDashboard?.gatewayKeys || [];
         balances.value = nextDashboard?.balances || [];
         logs.value = nextDashboard?.logs || [];
+        providerModels.value = nextDashboard?.providerModels || {};
+        modelDiscovery.value = nextDashboard?.modelDiscovery || {};
+        modelRoutes.value = nextDashboard?.modelRoutes || [];
+        modelStates.value = nextDashboard?.modelStates || [];
         routing.value = nextDashboard?.routing || {};
         snippets.value = nextDashboard?.snippets || {};
         if (!keyForm.providerId && providers.value.length) keyForm.providerId = providers.value[0].id;
@@ -306,6 +323,10 @@ createApp({
       gatewayKeys.value = [];
       balances.value = [];
       balanceResults.value = [];
+      providerModels.value = {};
+      modelDiscovery.value = {};
+      modelRoutes.value = [];
+      modelStates.value = [];
       logRequestSequence += 1;
       logsLoading.value = false;
       logs.value = [];
@@ -579,6 +600,178 @@ createApp({
       const fromTests = providerModels.value[providerId] || [];
       return [...new Set([...fromMap, ...fromTests].map((model) => String(model || '').trim()).filter(Boolean))];
     };
+
+    const providerDiscoveredModels = (providerId) => providerModels.value[providerId] || [];
+
+    const providerModelPreview = (providerId) => providerDiscoveredModels(providerId).slice(0, 12);
+
+    const discoveryForProvider = (providerId) => modelDiscovery.value[providerId] || {
+      providerId,
+      status: 'unknown',
+      modelCount: providerModelOptions(providerId).length,
+    };
+
+    const discoveryStatusClass = (providerId) => {
+      const status = discoveryForProvider(providerId).status;
+      if (status === 'ok') return 'ok';
+      if (status === 'unknown') return '';
+      return 'bad';
+    };
+
+    const discoveryStatusText = (providerId) => {
+      const status = discoveryForProvider(providerId).status;
+      if (status === 'ok') return t('model.discovery.ok');
+      if (status === 'unknown') return t('model.discovery.unknown');
+      if (status === 'empty') return t('model.discovery.empty');
+      return t('model.discovery.error');
+    };
+
+    const refreshProviderModels = async (provider) => {
+      if (!provider?.id || refreshingProviderId.value) return;
+      refreshingProviderId.value = provider.id;
+      try {
+        await runAction(async () => {
+          const result = await api(`providers/${provider.id}/models`, { method: 'POST', body: '{}' });
+          rememberProviderModels(provider.id, result?.models || []);
+          if (result?.keyId) keyTestResults.value = { ...keyTestResults.value, [result.keyId]: result };
+          await refresh();
+        });
+      } finally {
+        refreshingProviderId.value = '';
+      }
+    };
+
+    const defaultRouteTarget = (providerId = '') => {
+      const selectedProvider = providerId || providers.value.find((item) => item.enabled)?.id || providers.value[0]?.id || '';
+      return {
+        providerId: selectedProvider,
+        upstreamModel: providerModelOptions(selectedProvider)[0] || '',
+        enabled: true,
+      };
+    };
+
+    const defaultRouteModel = (priority = 100) => {
+      const target = defaultRouteTarget();
+      return {
+        name: target.upstreamModel || '',
+        priority,
+        enabled: true,
+        targets: [target],
+      };
+    };
+
+    const resetModelRouteForm = () => {
+      Object.assign(modelRouteForm, {
+        editingId: '',
+        id: '',
+        name: '',
+        enabled: true,
+        models: [defaultRouteModel()],
+      });
+    };
+
+    const openModelRouteForm = (route = null) => {
+      setActiveSection('model-routing');
+      formError.value = '';
+      if (!route) {
+        resetModelRouteForm();
+      } else {
+        Object.assign(modelRouteForm, {
+          editingId: route.id,
+          id: route.id,
+          name: route.name || route.id,
+          enabled: !!route.enabled,
+          models: (route.models || []).map((item) => ({
+            name: item.name || '',
+            priority: Number(item.priority || 0),
+            enabled: !!item.enabled,
+            targets: (item.targets || []).map((target) => ({
+              providerId: target.providerId || '',
+              upstreamModel: target.upstreamModel || '',
+              enabled: !!target.enabled,
+            })),
+          })),
+        });
+      }
+      modelRouteFormOpen.value = true;
+      providerFormOpen.value = false;
+      keyFormOpen.value = false;
+    };
+
+    const cancelModelRouteForm = () => {
+      resetModelRouteForm();
+      modelRouteFormOpen.value = false;
+      formError.value = '';
+    };
+
+    const addRouteModel = () => {
+      const priorities = modelRouteForm.models.map((item) => Number(item.priority || 0));
+      const nextPriority = priorities.length ? Math.max(0, Math.min(...priorities) - 10) : 100;
+      modelRouteForm.models.push(defaultRouteModel(nextPriority));
+    };
+
+    const removeRouteModel = (modelIndex) => {
+      modelRouteForm.models.splice(modelIndex, 1);
+    };
+
+    const addRouteTarget = (modelIndex) => {
+      modelRouteForm.models[modelIndex]?.targets.push(defaultRouteTarget());
+    };
+
+    const removeRouteTarget = (modelIndex, targetIndex) => {
+      modelRouteForm.models[modelIndex]?.targets.splice(targetIndex, 1);
+    };
+
+    const saveModelRoute = async () => {
+      formError.value = '';
+      const payload = {
+        id: modelRouteForm.id.trim(),
+        name: modelRouteForm.name.trim() || modelRouteForm.id.trim(),
+        enabled: !!modelRouteForm.enabled,
+        models: modelRouteForm.models.map((item) => ({
+          name: String(item.name || '').trim(),
+          priority: Number(item.priority || 0),
+          enabled: !!item.enabled,
+          targets: (item.targets || []).map((target) => ({
+            providerId: String(target.providerId || '').trim(),
+            upstreamModel: String(target.upstreamModel || '').trim(),
+            enabled: !!target.enabled,
+          })),
+        })),
+      };
+      if (!payload.id || !payload.models.length) {
+        formError.value = t('error.modelRouteRequired');
+        return;
+      }
+      await runAction(async () => {
+        await api(modelRouteForm.editingId ? `model-routes/${modelRouteForm.editingId}` : 'model-routes', {
+          method: modelRouteForm.editingId ? 'PUT' : 'POST',
+          body: JSON.stringify(payload),
+        });
+        cancelModelRouteForm();
+        await refresh();
+      }, formError);
+    };
+
+    const toggleModelRoute = async (route) => runAction(async () => {
+      await api(`model-routes/${route.id}`, {
+        method: 'PUT',
+        body: JSON.stringify({ ...route, enabled: !route.enabled }),
+      });
+      await refresh();
+    });
+
+    const deleteModelRoute = async (route) => {
+      if (!confirmDelete(t('confirm.deleteModelRoute', { id: route.id }), route.id)) return;
+      await runAction(async () => {
+        await api(`model-routes/${route.id}`, { method: 'DELETE' });
+        await refresh();
+      });
+    };
+
+    const modelStateFor = (providerId, upstreamModel) => modelStates.value.find(
+      (item) => item.providerId === providerId && item.modelId === upstreamModel,
+    );
 
     const applyDefaultModelToMap = (modelMap, defaultModel) => {
       const next = { ...(modelMap || {}) };
@@ -974,6 +1167,7 @@ createApp({
       balanceRefreshing,
       balanceResults,
       cancelKeyForm,
+      cancelModelRouteForm,
       cancelProviderForm,
       copyButtonClass,
       copyButtonText,
@@ -1017,6 +1211,27 @@ createApp({
       providerModelOptions,
       providerTypeLabel,
       modelMapDefault,
+      modelDiscovery,
+      modelRouteForm,
+      modelRouteFormOpen,
+      modelRoutes,
+      modelStateFor,
+      modelStates,
+      openModelRouteForm,
+      addRouteModel,
+      removeRouteModel,
+      addRouteTarget,
+      removeRouteTarget,
+      saveModelRoute,
+      toggleModelRoute,
+      deleteModelRoute,
+      providerModelPreview,
+      providerDiscoveredModels,
+      discoveryForProvider,
+      discoveryStatusClass,
+      discoveryStatusText,
+      refreshProviderModels,
+      refreshingProviderId,
       providerApiEndpoint,
       providerBalanceText,
       balanceStatusClass,

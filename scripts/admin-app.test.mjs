@@ -226,6 +226,124 @@ test('key edit and routing save send the current form state', async () => {
   assert.equal(harness.exposed.routingMessage.value, 'routing.restartRequired');
 });
 
+test('dashboard refresh restores persisted model inventories and routes', async () => {
+  const route = {
+    id: 'coding-auto', name: 'Coding', enabled: true,
+    models: [{
+      name: 'primary', priority: 100, enabled: true,
+      targets: [{ providerId: 'acme', upstreamModel: 'gpt-primary', enabled: true }],
+    }],
+  };
+  const harness = createHarness({
+    fetchImpl: async (url) => {
+      assert.equal(url, '/admin/api/dashboard');
+      return response({
+        providers: [{ id: 'acme', name: 'Acme', enabled: true, modelMap: {} }],
+        keys: [],
+        providerModels: { acme: ['gpt-primary', 'gpt-fallback'] },
+        modelDiscovery: { acme: { providerId: 'acme', status: 'ok', modelCount: 2 } },
+        modelRoutes: [route],
+        modelStates: [{ providerId: 'acme', modelId: 'gpt-primary', failureCount: 1 }],
+      });
+    },
+  });
+
+  await harness.mounted[0]();
+
+  assert.deepEqual([...harness.exposed.providerDiscoveredModels('acme')], ['gpt-primary', 'gpt-fallback']);
+  assert.equal(harness.exposed.discoveryForProvider('acme').status, 'ok');
+  assert.equal(harness.exposed.modelRoutes.value[0].id, 'coding-auto');
+  assert.equal(harness.exposed.modelStateFor('acme', 'gpt-primary').failureCount, 1);
+});
+
+test('model route form sends nested model and provider priorities', async () => {
+  const requests = [];
+  const provider = { id: 'acme', name: 'Acme', enabled: true, modelMap: {} };
+  const harness = createHarness({
+    fetchImpl: async (url, options = {}) => {
+      requests.push({ url, options });
+      if (url === '/admin/api/model-routes') return response({ id: 'coding-auto' });
+      if (url === '/admin/api/dashboard') {
+        return response({ providers: [provider], keys: [], providerModels: { acme: ['gpt-primary', 'gpt-fallback'] } });
+      }
+      return response({});
+    },
+  });
+  await harness.mounted[0]();
+  harness.exposed.openModelRouteForm();
+  Object.assign(harness.exposed.modelRouteForm, {
+    id: 'coding-auto',
+    name: 'Coding',
+    enabled: true,
+    models: [
+      {
+        name: 'gpt-primary', priority: 100, enabled: true,
+        targets: [{ providerId: 'acme', upstreamModel: 'gpt-primary', enabled: true }],
+      },
+      {
+        name: 'gpt-fallback', priority: 10, enabled: true,
+        targets: [{ providerId: 'acme', upstreamModel: 'gpt-fallback', enabled: true }],
+      },
+    ],
+  });
+
+  await harness.exposed.saveModelRoute();
+
+  const request = requests.find((item) => item.url === '/admin/api/model-routes');
+  assert.equal(request.options.method, 'POST');
+  assert.deepEqual(JSON.parse(request.options.body), {
+    id: 'coding-auto',
+    name: 'Coding',
+    enabled: true,
+    models: [
+      {
+        name: 'gpt-primary', priority: 100, enabled: true,
+        targets: [{ providerId: 'acme', upstreamModel: 'gpt-primary', enabled: true }],
+      },
+      {
+        name: 'gpt-fallback', priority: 10, enabled: true,
+        targets: [{ providerId: 'acme', upstreamModel: 'gpt-fallback', enabled: true }],
+      },
+    ],
+  });
+  assert.equal(harness.exposed.modelRouteFormOpen.value, false);
+});
+
+test('adding a fallback model never creates a negative priority', () => {
+  const harness = createHarness();
+  harness.exposed.modelRouteForm.models = [{ priority: 0 }];
+
+  harness.exposed.addRouteModel();
+
+  assert.equal(harness.exposed.modelRouteForm.models[1].priority, 0);
+});
+
+test('provider model refresh calls the discovery-only endpoint', async () => {
+  const requests = [];
+  const provider = { id: 'acme', name: 'Acme', enabled: true, modelMap: {} };
+  const harness = createHarness({
+    fetchImpl: async (url, options = {}) => {
+      requests.push({ url, options });
+      if (url === '/admin/api/providers/acme/models') {
+        return response({ providerId: 'acme', status: 'ok', models: ['gpt-primary'], modelCount: 1 });
+      }
+      if (url === '/admin/api/dashboard') {
+        return response({ providers: [provider], keys: [{ id: 'key', providerId: 'acme' }], providerModels: { acme: ['gpt-primary'] } });
+      }
+      return response({});
+    },
+  });
+  await harness.mounted[0]();
+
+  await harness.exposed.refreshProviderModels(provider);
+
+  const request = requests.find((item) => item.url === '/admin/api/providers/acme/models');
+  assert.equal(request.options.method, 'POST');
+  assert.equal(request.options.body, '{}');
+  assert.deepEqual([...harness.exposed.providerDiscoveredModels('acme')], ['gpt-primary']);
+  assert.equal(harness.exposed.refreshingProviderId.value, '');
+});
+
 test('database and portable backup actions download files and clear passphrases', async () => {
   const requests = [];
   const harness = createHarness({

@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -81,6 +82,162 @@ func TestFailoverToSecondKey(t *testing.T) {
 	}
 	if calls != 2 {
 		t.Fatalf("calls = %d, want 2", calls)
+	}
+}
+
+func TestModelRouteExhaustsProvidersBeforeFallbackModel(t *testing.T) {
+	var callsMu sync.Mutex
+	calls := make([]string, 0)
+	record := func(provider, upstreamModel string) {
+		callsMu.Lock()
+		calls = append(calls, provider+":"+upstreamModel)
+		callsMu.Unlock()
+	}
+	readCalls := func() []string {
+		callsMu.Lock()
+		defer callsMu.Unlock()
+		return append([]string(nil), calls...)
+	}
+	resetCalls := func() {
+		callsMu.Lock()
+		calls = calls[:0]
+		callsMu.Unlock()
+	}
+
+	modelError := func(w http.ResponseWriter, upstreamModel string) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = fmt.Fprintf(w, `{"error":{"message":"model %s not found"}}`, upstreamModel)
+	}
+	modelFromRequest := func(t *testing.T, r *http.Request) string {
+		t.Helper()
+		var payload struct {
+			Model string `json:"model"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Errorf("decode upstream request: %v", err)
+		}
+		return payload.Model
+	}
+	writeSuccess := func(w http.ResponseWriter, content string) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprintf(w, `{"choices":[{"message":{"role":"assistant","content":%q},"finish_reason":"stop"}]}`, content)
+	}
+
+	var highAuthFailure atomic.Bool
+	high := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamModel := modelFromRequest(t, r)
+		record("high", upstreamModel)
+		if highAuthFailure.Load() {
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"error":{"message":"invalid upstream key"}}`))
+			return
+		}
+		if upstreamModel == "high-primary" {
+			modelError(w, upstreamModel)
+			return
+		}
+		writeSuccess(w, "high fallback")
+	}))
+	defer high.Close()
+
+	var lowPrimaryUnavailable atomic.Bool
+	low := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamModel := modelFromRequest(t, r)
+		record("low", upstreamModel)
+		if upstreamModel == "low-primary" && lowPrimaryUnavailable.Load() {
+			modelError(w, upstreamModel)
+			return
+		}
+		writeSuccess(w, strings.ReplaceAll(upstreamModel, "-", " "))
+	}))
+	defer low.Close()
+
+	ctx := context.Background()
+	st := testStore(t)
+	_, _ = st.UpsertProvider(ctx, model.Provider{ID: "high", Name: "high", Type: model.ProviderOpenAICompatible, BaseURL: high.URL, Priority: 100, Enabled: true})
+	_, _ = st.UpsertProvider(ctx, model.Provider{ID: "low", Name: "low", Type: model.ProviderOpenAICompatible, BaseURL: low.URL, Priority: 1, Enabled: true})
+	_, _ = st.UpsertKey(ctx, model.Key{ID: "high-key", ProviderID: "high", Name: "high", Secret: "high", Enabled: true})
+	_, _ = st.UpsertKey(ctx, model.Key{ID: "low-key", ProviderID: "low", Name: "low", Secret: "low", Enabled: true})
+	_, err := st.UpsertModelRoute(ctx, model.ModelRoute{
+		ID: "coding-auto", Name: "Coding", Enabled: true,
+		Models: []model.ModelRouteModel{
+			{Name: "primary", Priority: 100, Enabled: true, Targets: []model.ModelRouteTarget{
+				{ProviderID: "high", UpstreamModel: "high-primary", Enabled: true},
+				{ProviderID: "low", UpstreamModel: "low-primary", Enabled: true},
+			}},
+			{Name: "fallback", Priority: 10, Enabled: true, Targets: []model.ModelRouteTarget{
+				{ProviderID: "high", UpstreamModel: "high-fallback", Enabled: true},
+				{ProviderID: "low", UpstreamModel: "low-fallback", Enabled: true},
+			}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	gatewayKey, err := st.CreateGatewayKey(ctx, "model-route")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Default()
+	cfg.Routing.RetryPerRequest = 4
+
+	send := func(gw *httptest.Server) string {
+		t.Helper()
+		req, _ := http.NewRequest(http.MethodPost, gw.URL+"/v1/chat/completions", strings.NewReader(`{"model":"coding-auto","messages":[{"role":"user","content":"hi"}]}`))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+gatewayKey.Plaintext)
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		body, err := io.ReadAll(res.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("status = %d, body = %s", res.StatusCode, body)
+		}
+		return string(body)
+	}
+
+	gw := testGateway(t, st, cfg)
+	if body := send(gw); !strings.Contains(body, "low primary") {
+		t.Fatalf("first response = %s", body)
+	}
+	gw.Close()
+	if got := strings.Join(readCalls(), ","); got != "high:high-primary,low:low-primary" {
+		t.Fatalf("first attempt order = %s", got)
+	}
+
+	if err := st.ResetProviderModelState(ctx, "high", "high-primary"); err != nil {
+		t.Fatal(err)
+	}
+	lowPrimaryUnavailable.Store(true)
+	resetCalls()
+	gw = testGateway(t, st, cfg)
+	if body := send(gw); !strings.Contains(body, "high fallback") {
+		t.Fatalf("fallback response = %s", body)
+	}
+	if got := strings.Join(readCalls(), ","); got != "high:high-primary,low:low-primary,high:high-fallback" {
+		t.Fatalf("fallback attempt order = %s", got)
+	}
+	gw.Close()
+
+	for _, providerModel := range [][2]string{{"high", "high-primary"}, {"low", "low-primary"}} {
+		if err := st.ResetProviderModelState(ctx, providerModel[0], providerModel[1]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	highAuthFailure.Store(true)
+	resetCalls()
+	gw = testGateway(t, st, cfg)
+	defer gw.Close()
+	if body := send(gw); !strings.Contains(body, "low fallback") {
+		t.Fatalf("key failure response = %s", body)
+	}
+	if got := strings.Join(readCalls(), ","); got != "high:high-primary,low:low-primary,low:low-fallback" {
+		t.Fatalf("key failure attempt order = %s", got)
 	}
 }
 

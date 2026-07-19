@@ -41,7 +41,7 @@ chmod +x gateway gateway-backup
 
 首次启动会在程序所在目录创建 `data` 文件夹。后台管理员 Token 保存在 `data/admin.token`，在管理后台登录时使用该 Token。
 
-登录后先添加 Provider 和上游 Key，再在“网关 Key”页面创建供客户端使用的 `sk-...` Key。真实上游 Key 只保存在本机网关中。
+登录后先添加 Provider 和上游 Key，等待模型列表自动同步；需要统一模型入口时，在“模型优先路由”页面配置逻辑模型及备用顺序。最后在“网关 Key”页面创建供客户端使用的 `sk-...` Key。真实上游 Key 只保存在本机网关中。
 
 ## 数据与升级
 

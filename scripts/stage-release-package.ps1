@@ -15,6 +15,12 @@ param(
 $ErrorActionPreference = "Stop"
 $Root = [System.IO.Path]::GetFullPath((Split-Path -Parent $PSScriptRoot))
 $Destination = [System.IO.Path]::GetFullPath($Destination)
+
+function Write-AsciiLinesLF([string]$Path, [string[]]$Lines) {
+  $text = if ($Lines.Count -gt 0) { ($Lines -join "`n") + "`n" } else { "" }
+  [System.IO.File]::WriteAllText($Path, $text, [System.Text.Encoding]::ASCII)
+}
+
 $destinationPrefix = $Destination.TrimEnd([System.IO.Path]::DirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
 if ($Destination -eq [System.IO.Path]::GetPathRoot($Destination) -or
     $Destination -eq $Root -or
@@ -71,7 +77,7 @@ $metadata = [ordered]@{
   sourceSha256 = $sourceDigest
 }
 $metadata | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $Destination "VERSION.json") -Encoding utf8
-$sourceManifestLines | Set-Content -LiteralPath (Join-Path $Destination "SOURCE-MANIFEST.txt") -Encoding ascii
+Write-AsciiLinesLF (Join-Path $Destination "SOURCE-MANIFEST.txt") $sourceManifestLines
 
 $checksumPath = Join-Path $Destination "SHA256SUMS"
 $checksumLines = Get-ChildItem -LiteralPath $Destination -File -Recurse |
@@ -82,4 +88,4 @@ $checksumLines = Get-ChildItem -LiteralPath $Destination -File -Recurse |
     $relative = [System.IO.Path]::GetRelativePath($Destination, $_.FullName).Replace('\', '/')
     "$hash  $relative"
   }
-$checksumLines | Set-Content -LiteralPath $checksumPath -Encoding ascii
+Write-AsciiLinesLF $checksumPath $checksumLines

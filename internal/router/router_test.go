@@ -2,6 +2,7 @@ package router
 
 import (
 	"context"
+	"net/http"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -353,5 +354,100 @@ func TestOpenAIResponsesOnlyUsesOpenAIUpstreams(t *testing.T) {
 	}
 	if len(items) != 1 || items[0].ID != "openai-key" {
 		t.Fatalf("candidates = %#v", items)
+	}
+}
+
+func TestModelRouteCandidatesPreferModelBeforeProviderPriority(t *testing.T) {
+	ctx := context.Background()
+	st := testStore(t)
+	_, _ = st.UpsertProvider(ctx, model.Provider{ID: "high", Name: "high", Type: model.ProviderOpenAICompatible, BaseURL: "http://high", Priority: 100, Enabled: true})
+	_, _ = st.UpsertProvider(ctx, model.Provider{ID: "low", Name: "low", Type: model.ProviderOpenAICompatible, BaseURL: "http://low", Priority: 1, Enabled: true})
+	_, _ = st.UpsertKey(ctx, model.Key{ID: "high-key", ProviderID: "high", Name: "high", Secret: "high", Enabled: true})
+	_, _ = st.UpsertKey(ctx, model.Key{ID: "low-key", ProviderID: "low", Name: "low", Secret: "low", Enabled: true})
+	_, err := st.UpsertModelRoute(ctx, model.ModelRoute{
+		ID: "coding-auto", Name: "Coding", Enabled: true,
+		Models: []model.ModelRouteModel{
+			{Name: "fallback", Priority: 10, Enabled: true, Targets: []model.ModelRouteTarget{
+				{ProviderID: "high", UpstreamModel: "high-fallback", Enabled: true},
+			}},
+			{Name: "primary", Priority: 100, Enabled: true, Targets: []model.ModelRouteTarget{
+				{ProviderID: "low", UpstreamModel: "low-primary", Enabled: true},
+				{ProviderID: "high", UpstreamModel: "high-primary", Enabled: true},
+			}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	items, err := New(st, config.Default().Routing).Candidates(ctx, "coding-auto", ProtocolOpenAI)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 3 {
+		t.Fatalf("candidates = %#v", items)
+	}
+	want := []struct {
+		provider string
+		model    string
+		route    string
+	}{
+		{provider: "high", model: "high-primary", route: "primary"},
+		{provider: "low", model: "low-primary", route: "primary"},
+		{provider: "high", model: "high-fallback", route: "fallback"},
+	}
+	for index, expected := range want {
+		if got := items[index]; got.ProviderID != expected.provider || got.UpstreamModel != expected.model || got.RouteModel != expected.route {
+			t.Fatalf("candidate %d = %#v, want provider=%s model=%s route=%s", index, got, expected.provider, expected.model, expected.route)
+		}
+	}
+}
+
+func TestModelUnavailableCoolsOnlyProviderModelPair(t *testing.T) {
+	ctx := context.Background()
+	st := testStore(t)
+	_, _ = st.UpsertProvider(ctx, model.Provider{ID: "high", Name: "high", Type: model.ProviderOpenAICompatible, BaseURL: "http://high", Priority: 100, Enabled: true})
+	_, _ = st.UpsertProvider(ctx, model.Provider{ID: "low", Name: "low", Type: model.ProviderOpenAICompatible, BaseURL: "http://low", Priority: 1, Enabled: true})
+	_, _ = st.UpsertKey(ctx, model.Key{ID: "high-key", ProviderID: "high", Name: "high", Secret: "high", Enabled: true})
+	_, _ = st.UpsertKey(ctx, model.Key{ID: "low-key", ProviderID: "low", Name: "low", Secret: "low", Enabled: true})
+	_, err := st.UpsertModelRoute(ctx, model.ModelRoute{
+		ID: "coding-auto", Name: "Coding", Enabled: true,
+		Models: []model.ModelRouteModel{
+			{Name: "primary", Priority: 100, Enabled: true, Targets: []model.ModelRouteTarget{
+				{ProviderID: "high", UpstreamModel: "high-primary", Enabled: true},
+				{ProviderID: "low", UpstreamModel: "low-primary", Enabled: true},
+			}},
+			{Name: "fallback", Priority: 10, Enabled: true, Targets: []model.ModelRouteTarget{
+				{ProviderID: "high", UpstreamModel: "high-fallback", Enabled: true},
+			}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rt := New(st, config.Default().Routing)
+	items, err := rt.Candidates(ctx, "coding-auto", ProtocolOpenAI)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := rt.RecordCandidateFailure(ctx, items[0], Failure{Status: http.StatusNotFound, ErrorType: "model_unavailable", Message: "model not found"}); err != nil {
+		t.Fatal(err)
+	}
+
+	items, err = rt.Candidates(ctx, "coding-auto", ProtocolOpenAI)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 2 || items[0].ProviderID != "low" || items[0].UpstreamModel != "low-primary" || items[1].ProviderID != "high" || items[1].UpstreamModel != "high-fallback" {
+		t.Fatalf("candidates after model cooldown = %#v", items)
+	}
+	keys, err := st.ListKeys(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	highKey := findRouterTestKey(keys, "high-key")
+	if highKey == nil || highKey.ConsecutiveFailures != 0 || highKey.CooldownUntil != nil {
+		t.Fatalf("high key health changed after model error: %#v", highKey)
 	}
 }

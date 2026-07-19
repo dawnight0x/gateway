@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"context"
 	"crypto/subtle"
 	"database/sql"
 	"encoding/csv"
@@ -15,6 +16,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"local-ai-gateway/internal/config"
@@ -50,17 +52,37 @@ type gatewayKeyInput struct {
 	Enabled *bool  `json:"enabled"`
 }
 
+const maximumPriority = 1000
+
+func validatePriority(label string, priority int) error {
+	if priority < 0 || priority > maximumPriority {
+		return fmt.Errorf("%s priority must be between 0 and %d", label, maximumPriority)
+	}
+	return nil
+}
+
 type Service struct {
 	store      *store.Store
 	cfg        config.Config
 	files      http.Handler
 	httpClient *http.Client
+
+	discoveryMu      sync.Mutex
+	discoveryCtx     context.Context
+	discoveryCancel  context.CancelFunc
+	discoveryWG      sync.WaitGroup
+	discoveryRunning map[string]struct{}
+	discoveryPending map[string]bool
 }
 
 func New(st *store.Store, cfg config.Config) *Service {
 	sub, _ := fs.Sub(adminweb.FS, ".")
 	client := upstreamhttp.New(time.Duration(cfg.Routing.TimeoutSeconds)*time.Second, 0, max(cfg.Routing.MaxConcurrentPerProvider, 4))
-	return &Service{store: st, cfg: cfg, files: http.FileServer(http.FS(sub)), httpClient: client}
+	return &Service{
+		store: st, cfg: cfg, files: http.FileServer(http.FS(sub)), httpClient: client,
+		discoveryRunning: make(map[string]struct{}),
+		discoveryPending: make(map[string]bool),
+	}
 }
 
 func (s *Service) Register(mux *http.ServeMux) {
@@ -147,6 +169,8 @@ func (s *Service) api(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, http.StatusOK, s.cfg.Routing)
+	case "model-routes":
+		s.modelRoutes(w, r, parts)
 	case "setup-snippets":
 		if !requireMethod(w, r, http.MethodGet) {
 			return
@@ -224,9 +248,9 @@ func writeLogCSV(w http.ResponseWriter, logs []model.RequestLog) {
 	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
 	w.Header().Set("Content-Disposition", `attachment; filename="gateway-request-logs.csv"`)
 	writer := csv.NewWriter(w)
-	_ = writer.Write([]string{"request_id", "created_at", "protocol", "provider_id", "key_id", "model", "status", "latency_ms", "prompt_tokens", "completion_tokens", "total_tokens", "error_type"})
+	_ = writer.Write([]string{"request_id", "created_at", "protocol", "provider_id", "key_id", "model", "route_id", "upstream_model", "attempts", "status", "latency_ms", "prompt_tokens", "completion_tokens", "total_tokens", "error_type"})
 	for _, item := range logs {
-		_ = writer.Write([]string{item.RequestID, item.CreatedAt.Format(time.RFC3339), item.InboundProtocol, item.ProviderID, item.KeyID, item.Model, strconv.Itoa(item.Status), strconv.FormatInt(item.LatencyMS, 10), optionalInt(item.PromptTokens), optionalInt(item.CompletionTokens), optionalInt(item.TotalTokens), item.ErrorType})
+		_ = writer.Write([]string{item.RequestID, item.CreatedAt.Format(time.RFC3339), item.InboundProtocol, item.ProviderID, item.KeyID, item.Model, item.RouteID, item.UpstreamModel, strconv.Itoa(item.Attempts), strconv.Itoa(item.Status), strconv.FormatInt(item.LatencyMS, 10), optionalInt(item.PromptTokens), optionalInt(item.CompletionTokens), optionalInt(item.TotalTokens), item.ErrorType})
 	}
 	writer.Flush()
 }
@@ -396,6 +420,26 @@ func (s *Service) dashboard(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "failed to load request logs"})
 		return
 	}
+	providerModels, err := s.store.ListProviderModels(ctx)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "failed to load discovered models"})
+		return
+	}
+	modelDiscovery, err := s.store.ListProviderModelDiscoveries(ctx)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "failed to load model discovery state"})
+		return
+	}
+	modelRoutes, err := s.store.ListModelRoutes(ctx)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "failed to load model routes"})
+		return
+	}
+	modelStates, err := s.store.ListProviderModelStates(ctx)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "failed to load model health state"})
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"service": map[string]any{
 			"status":   "ok",
@@ -403,14 +447,18 @@ func (s *Service) dashboard(w http.ResponseWriter, r *http.Request) {
 			"adminUrl": s.cfg.PublicURL() + "/admin",
 			"timezone": s.cfg.Storage.Timezone,
 		},
-		"stats":       stats,
-		"providers":   providers,
-		"keys":        keys,
-		"gatewayKeys": gatewayKeys,
-		"balances":    balances,
-		"logs":        logs,
-		"routing":     s.cfg.Routing,
-		"snippets":    s.snippets(),
+		"stats":          stats,
+		"providers":      providers,
+		"keys":           keys,
+		"gatewayKeys":    gatewayKeys,
+		"balances":       balances,
+		"logs":           logs,
+		"providerModels": providerModels,
+		"modelDiscovery": modelDiscovery,
+		"modelRoutes":    modelRoutes,
+		"modelStates":    modelStates,
+		"routing":        s.cfg.Routing,
+		"snippets":       s.snippets(),
 	})
 }
 
@@ -495,8 +543,17 @@ func (s *Service) gatewayKeys(w http.ResponseWriter, r *http.Request, parts []st
 
 func (s *Service) providers(w http.ResponseWriter, r *http.Request, parts []string) {
 	id := ""
+	action := ""
 	if len(parts) > 1 {
 		id = parts[1]
+	}
+	if len(parts) > 2 {
+		action = parts[2]
+	}
+	if r.Method == http.MethodPost && id != "" && action == "models" {
+		result := s.refreshProviderModels(r.Context(), id)
+		writeJSON(w, http.StatusOK, result)
+		return
 	}
 	switch r.Method {
 	case http.MethodGet:
@@ -576,6 +633,7 @@ func (s *Service) providers(w http.ResponseWriter, r *http.Request, parts []stri
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
 			return
 		}
+		s.scheduleProviderModelDiscovery(item.ID)
 		writeJSON(w, http.StatusOK, item)
 	case http.MethodDelete:
 		if err := s.store.DeleteProvider(r.Context(), id); err != nil {
@@ -697,6 +755,7 @@ func (s *Service) keys(w http.ResponseWriter, r *http.Request, parts []string) {
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
 			return
 		}
+		s.scheduleProviderModelDiscovery(item.ProviderID)
 		writeJSON(w, http.StatusOK, item)
 	case http.MethodDelete:
 		if err := s.store.DeleteKey(r.Context(), id); err != nil {
@@ -759,6 +818,9 @@ func mergeProvider(current model.Provider, patch providerInput) model.Provider {
 func validateProvider(p model.Provider) error {
 	if strings.TrimSpace(p.Name) == "" {
 		return fmt.Errorf("provider name is required")
+	}
+	if err := validatePriority("provider", p.Priority); err != nil {
+		return err
 	}
 	switch strings.TrimSpace(p.Type) {
 	case model.ProviderOpenAICompatible, model.ProviderAnthropicCompatible, model.ProviderGeminiCompatible,
@@ -845,6 +907,9 @@ func validateKey(k model.Key) error {
 	}
 	if strings.TrimSpace(k.Secret) == "" {
 		return fmt.Errorf("key secret is required")
+	}
+	if err := validatePriority("key", k.Priority); err != nil {
+		return err
 	}
 	return nil
 }

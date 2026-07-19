@@ -2,6 +2,7 @@ package router
 
 import (
 	"context"
+	"errors"
 	"sort"
 	"strings"
 	"sync"
@@ -23,9 +24,11 @@ type Router struct {
 	store *store.Store
 	cfg   config.RoutingConfig
 
-	cacheMu    sync.Mutex
-	cachedKeys []model.Key
-	cacheUntil time.Time
+	cacheMu           sync.Mutex
+	cachedKeys        []model.Key
+	cachedRoutes      map[string]model.ModelRoute
+	cachedModelStates map[string]model.ProviderModelState
+	cacheUntil        time.Time
 
 	probeMu sync.Mutex
 	probes  map[string]struct{}
@@ -41,31 +44,54 @@ type Failure struct {
 }
 
 func New(st *store.Store, cfg config.RoutingConfig) *Router {
-	return &Router{store: st, cfg: cfg, probes: make(map[string]struct{})}
+	return &Router{
+		store:             st,
+		cfg:               cfg,
+		probes:            make(map[string]struct{}),
+		cachedRoutes:      make(map[string]model.ModelRoute),
+		cachedModelStates: make(map[string]model.ProviderModelState),
+	}
 }
 
 // AcquireRecoveryProbe ensures only one request tests a key whose cooldown has expired.
 func (r *Router) AcquireRecoveryProbe(key model.Key) (func(), bool) {
-	if key.CooldownUntil == nil || key.CooldownUntil.After(time.Now()) {
+	now := time.Now()
+	probeIDs := make([]string, 0, 2)
+	if key.CooldownUntil != nil && !key.CooldownUntil.After(now) {
+		probeIDs = append(probeIDs, "key:"+key.ID)
+	}
+	if key.ModelCooldownUntil != nil && !key.ModelCooldownUntil.After(now) {
+		probeIDs = append(probeIDs, "model:"+modelStateKey(key.ProviderID, key.UpstreamModel))
+	}
+	if len(probeIDs) == 0 {
 		return func() {}, true
 	}
 	r.probeMu.Lock()
 	defer r.probeMu.Unlock()
-	if _, exists := r.probes[key.ID]; exists {
-		return func() {}, false
+	for _, probeID := range probeIDs {
+		if _, exists := r.probes[probeID]; exists {
+			return func() {}, false
+		}
 	}
-	r.probes[key.ID] = struct{}{}
+	for _, probeID := range probeIDs {
+		r.probes[probeID] = struct{}{}
+	}
 	return func() {
 		r.probeMu.Lock()
-		delete(r.probes, key.ID)
+		for _, probeID := range probeIDs {
+			delete(r.probes, probeID)
+		}
 		r.probeMu.Unlock()
 	}, true
 }
 
 func (r *Router) Candidates(ctx context.Context, modelName string, inboundProtocol string) ([]model.Key, error) {
-	keys, err := r.routingKeys(ctx)
+	keys, routes, modelStates, err := r.routingData(ctx)
 	if err != nil {
 		return nil, err
+	}
+	if route, ok := routes[modelName]; ok && route.Enabled {
+		return routeCandidates(keys, route, modelStates, inboundProtocol), nil
 	}
 	now := time.Now()
 	var out []model.Key
@@ -86,6 +112,12 @@ func (r *Router) Candidates(ctx context.Context, modelName string, inboundProtoc
 		k.UpstreamModel = mapModel(k.ProviderModelMap, modelName)
 		if k.UpstreamModel == "" {
 			continue
+		}
+		if state, ok := modelStates[modelStateKey(k.ProviderID, k.UpstreamModel)]; ok {
+			if state.CooldownUntil != nil && state.CooldownUntil.After(now) {
+				continue
+			}
+			k.ModelCooldownUntil = state.CooldownUntil
 		}
 		out = append(out, k)
 	}
@@ -108,6 +140,49 @@ func (r *Router) Candidates(ctx context.Context, modelName string, inboundProtoc
 	return out, nil
 }
 
+func routeCandidates(keys []model.Key, route model.ModelRoute, modelStates map[string]model.ProviderModelState, inboundProtocol string) []model.Key {
+	now := time.Now()
+	out := make([]model.Key, 0)
+	for _, routeModel := range route.Models {
+		if !routeModel.Enabled {
+			continue
+		}
+		for _, target := range routeModel.Targets {
+			if !target.Enabled {
+				continue
+			}
+			state, hasState := modelStates[modelStateKey(target.ProviderID, target.UpstreamModel)]
+			if hasState && state.CooldownUntil != nil && state.CooldownUntil.After(now) {
+				continue
+			}
+			for _, key := range keys {
+				if key.ProviderID != target.ProviderID || !key.Enabled || !key.ProviderEnabled {
+					continue
+				}
+				if key.CooldownUntil != nil && key.CooldownUntil.After(now) {
+					continue
+				}
+				upstreamProtocol := ChooseUpstreamProtocol(inboundProtocol, key)
+				if inboundProtocol == ProtocolOpenAIResponses && upstreamProtocol != ProtocolOpenAIResponses {
+					continue
+				}
+				if !supportsProtocol(key.ProviderType, upstreamProtocol) {
+					continue
+				}
+				key.UpstreamModel = target.UpstreamModel
+				key.RouteID = route.ID
+				key.RouteModel = routeModel.Name
+				key.ModelPriority = routeModel.Priority
+				if hasState {
+					key.ModelCooldownUntil = state.CooldownUntil
+				}
+				out = append(out, key)
+			}
+		}
+	}
+	return out
+}
+
 func (r *Router) RecordSuccess(ctx context.Context, key model.Key) error {
 	resetHealth := key.ConsecutiveFailures > 0 || key.CooldownUntil != nil || key.LastError != ""
 	if err := r.store.RecordSuccess(ctx, key.ID, resetHealth); err != nil {
@@ -117,6 +192,18 @@ func (r *Router) RecordSuccess(ctx context.Context, key model.Key) error {
 		r.invalidateCache()
 	}
 	return nil
+}
+
+func (r *Router) RecordCandidateSuccess(ctx context.Context, key model.Key) error {
+	keyErr := r.RecordSuccess(ctx, key)
+	var modelErr error
+	if key.ProviderID != "" && key.UpstreamModel != "" {
+		modelErr = r.store.RecordProviderModelSuccess(ctx, key.ProviderID, key.UpstreamModel)
+	}
+	if key.ModelCooldownUntil != nil {
+		r.invalidateCache()
+	}
+	return errors.Join(keyErr, modelErr)
 }
 
 func (r *Router) RecordFailure(ctx context.Context, key model.Key, f Failure) error {
@@ -143,22 +230,66 @@ func (r *Router) RecordFailure(ctx context.Context, key model.Key, f Failure) er
 	return nil
 }
 
-func (r *Router) routingKeys(ctx context.Context) ([]model.Key, error) {
+func (r *Router) RecordCandidateFailure(ctx context.Context, key model.Key, f Failure) error {
+	if !CountsAgainstModelHealth(f.ErrorType) {
+		return r.RecordFailure(ctx, key, f)
+	}
+	status := f.Status
+	var statusPtr *int
+	if status > 0 {
+		statusPtr = &status
+	}
+	policy := store.FailurePolicy{
+		Threshold:     1,
+		Cooldown:      time.Duration(r.cfg.CooldownSeconds) * time.Second,
+		ForceCooldown: true,
+	}
+	if f.RetryAfterSeconds > 0 {
+		policy.OverrideCooldown = time.Duration(f.RetryAfterSeconds) * time.Second
+	}
+	if err := r.store.RecordProviderModelFailure(ctx, key.ProviderID, key.UpstreamModel, statusPtr, f.Message, policy); err != nil {
+		return err
+	}
+	r.invalidateCache()
+	return nil
+}
+
+func (r *Router) routingData(ctx context.Context) ([]model.Key, map[string]model.ModelRoute, map[string]model.ProviderModelState, error) {
 	r.cacheMu.Lock()
 	defer r.cacheMu.Unlock()
 	if time.Now().Before(r.cacheUntil) {
-		return append([]model.Key(nil), r.cachedKeys...), nil
+		return append([]model.Key(nil), r.cachedKeys...), r.cachedRoutes, r.cachedModelStates, nil
 	}
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return nil, nil, nil, err
 	}
 	keys, err := r.store.ListKeys(ctx)
 	if err != nil {
-		return nil, err
+		return nil, nil, nil, err
+	}
+	routes, err := r.store.ListModelRoutes(ctx)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	states, err := r.store.ListProviderModelStates(ctx)
+	if err != nil {
+		return nil, nil, nil, err
 	}
 	r.cachedKeys = append(r.cachedKeys[:0], keys...)
+	r.cachedRoutes = make(map[string]model.ModelRoute, len(routes))
+	for _, route := range routes {
+		r.cachedRoutes[route.ID] = route
+	}
+	r.cachedModelStates = make(map[string]model.ProviderModelState, len(states))
+	for _, state := range states {
+		r.cachedModelStates[modelStateKey(state.ProviderID, state.ModelID)] = state
+	}
 	r.cacheUntil = time.Now().Add(routingCacheTTL)
-	return append([]model.Key(nil), keys...), nil
+	return append([]model.Key(nil), keys...), r.cachedRoutes, r.cachedModelStates, nil
+}
+
+func modelStateKey(providerID, modelID string) string {
+	return providerID + "\x00" + modelID
 }
 
 func (r *Router) invalidateCache() {
@@ -169,6 +300,9 @@ func (r *Router) invalidateCache() {
 
 func Classify(status int, message string) string {
 	text := strings.ToLower(message)
+	if isModelUnavailable(status, text) {
+		return "model_unavailable"
+	}
 	if status == 401 || status == 403 {
 		return "auth_error"
 	}
@@ -207,11 +341,33 @@ func recoverableUpstreamError(errorType string) bool {
 }
 
 func Retryable(errorType string) bool {
-	return recoverableUpstreamError(errorType)
+	return recoverableUpstreamError(errorType) || errorType == "model_unavailable"
 }
 
 func CountsAgainstKeyHealth(errorType string) bool {
 	return recoverableUpstreamError(errorType)
+}
+
+func CountsAgainstModelHealth(errorType string) bool {
+	return errorType == "model_unavailable"
+}
+
+func isModelUnavailable(status int, text string) bool {
+	if status != 400 && status != 403 && status != 404 && status != 422 {
+		return false
+	}
+	if !strings.Contains(text, "model") {
+		return false
+	}
+	for _, marker := range []string{
+		"not found", "does not exist", "unavailable", "not available", "unsupported",
+		"invalid model", "no access", "permission", "not enabled", "disabled",
+	} {
+		if strings.Contains(text, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func ChooseUpstreamProtocol(inboundProtocol string, key model.Key) string {

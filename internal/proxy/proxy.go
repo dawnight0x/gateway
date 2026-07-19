@@ -191,7 +191,7 @@ func (s *Service) proxy(w http.ResponseWriter, r *http.Request) {
 			if !ok {
 				continue
 			}
-			if affinity != nil && (affinity.ProviderID != matched.ProviderID || affinity.KeyID != matched.KeyID) {
+			if affinity != nil && (affinity.ProviderID != matched.ProviderID || affinity.KeyID != matched.KeyID || affinity.UpstreamModel != matched.UpstreamModel) {
 				s.log(r.Context(), requestID, inbound, "", "", modelName, http.StatusConflict, start, protocol.Usage{}, "affinity_conflict")
 				writeJSON(w, http.StatusConflict, map[string]any{"error": map[string]any{"message": "Responses resources belong to different upstream keys", "type": "affinity_conflict"}})
 				return
@@ -203,7 +203,7 @@ func (s *Service) proxy(w http.ResponseWriter, r *http.Request) {
 			affinityResolved = true
 			filtered := candidates[:0]
 			for _, key := range candidates {
-				if key.ProviderID == affinity.ProviderID && key.ID == affinity.KeyID {
+				if key.ProviderID == affinity.ProviderID && key.ID == affinity.KeyID && (affinity.UpstreamModel == "" || key.UpstreamModel == affinity.UpstreamModel) {
 					filtered = append(filtered, key)
 				}
 			}
@@ -250,7 +250,7 @@ func (s *Service) proxy(w http.ResponseWriter, r *http.Request) {
 	attempted := 0
 	busy := false
 	var last attemptResult
-	var lastProviderID, lastKeyID string
+	var lastKey model.Key
 	remaining := append([]model.Key(nil), candidates...)
 	for len(remaining) > 0 && attempted < maxAttempts {
 		// Capture the change signal before the acquisition sweep so a release racing
@@ -281,12 +281,13 @@ func (s *Service) proxy(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		attempted++
-		lastProviderID, lastKeyID = key.ProviderID, key.ID
+		lastKey = key
 		result, done := s.attemptKey(w, r, key, pr, requestID, start, attempted, releaseCapacity, releaseProbe)
 		if done {
 			return
 		}
 		last = result
+		remaining = candidatesAfterFailure(remaining, key, result.errorType)
 		if !result.retryable || (result.ambiguous && !s.cfg.Routing.RetryAmbiguousErrors) {
 			break
 		}
@@ -302,8 +303,27 @@ func (s *Service) proxy(w http.ResponseWriter, r *http.Request) {
 	if status < 400 {
 		status = http.StatusBadGateway
 	}
-	s.log(r.Context(), requestID, inbound, lastProviderID, lastKeyID, modelName, status, start, last.usage, last.errorType)
+	s.logCandidate(r.Context(), requestID, inbound, lastKey, modelName, status, start, last.usage, last.errorType, attempted)
 	writeJSON(w, status, map[string]any{"error": map[string]any{"message": last.message, "type": last.errorType}})
+}
+
+func candidatesAfterFailure(candidates []model.Key, failed model.Key, errorType string) []model.Key {
+	keyUnavailable := router.CountsAgainstKeyHealth(errorType)
+	modelUnavailable := router.CountsAgainstModelHealth(errorType)
+	if !keyUnavailable && !modelUnavailable {
+		return candidates
+	}
+	filtered := candidates[:0]
+	for _, candidate := range candidates {
+		if keyUnavailable && candidate.ID == failed.ID {
+			continue
+		}
+		if modelUnavailable && candidate.ProviderID == failed.ProviderID && candidate.UpstreamModel == failed.UpstreamModel {
+			continue
+		}
+		filtered = append(filtered, candidate)
+	}
+	return filtered
 }
 
 // proxyRequest carries the immutable, per-request data shared across upstream attempts.
@@ -370,14 +390,14 @@ func (s *Service) attemptKey(w http.ResponseWriter, r *http.Request, key model.K
 		if result.ok {
 			if pr.inbound == router.ProtocolOpenAIResponses {
 				ids := append(append([]string(nil), pr.resourceRefs...), result.responseResourceIDs...)
-				if err := s.store.PutUpstreamAffinity(r.Context(), ids, key.ProviderID, key.ID); err != nil {
+				if err := s.store.PutUpstreamAffinity(r.Context(), ids, key.ProviderID, key.ID, key.UpstreamModel); err != nil {
 					slog.Warn("record upstream resource affinity failed", "key_id", key.ID, "error", err)
 				}
 			}
-			if err := s.router.RecordSuccess(r.Context(), key); err != nil {
+			if err := s.router.RecordCandidateSuccess(r.Context(), key); err != nil {
 				slog.Warn("record upstream success failed", "key_id", key.ID, "error", err)
 			}
-			s.log(r.Context(), requestID, pr.inbound, key.ProviderID, key.ID, pr.modelName, result.status, start, result.usage, "")
+			s.logCandidate(r.Context(), requestID, pr.inbound, key, pr.modelName, result.status, start, result.usage, "", attempted)
 			return result, true
 		}
 		if protocolIndex == 0 && result.endpointUnsupported && len(protocols) > 1 {
@@ -386,8 +406,8 @@ func (s *Service) attemptKey(w http.ResponseWriter, r *http.Request, key model.K
 		break
 	}
 
-	if router.CountsAgainstKeyHealth(result.errorType) {
-		if err := s.router.RecordFailure(r.Context(), key, router.Failure{
+	if router.CountsAgainstKeyHealth(result.errorType) || router.CountsAgainstModelHealth(result.errorType) {
+		if err := s.router.RecordCandidateFailure(r.Context(), key, router.Failure{
 			Status:            result.status,
 			ErrorType:         result.errorType,
 			Message:           result.message,
@@ -397,7 +417,7 @@ func (s *Service) attemptKey(w http.ResponseWriter, r *http.Request, key model.K
 		}
 	}
 	if result.committed {
-		s.log(r.Context(), requestID, pr.inbound, key.ProviderID, key.ID, pr.modelName, result.status, start, result.usage, result.errorType)
+		s.logCandidate(r.Context(), requestID, pr.inbound, key, pr.modelName, result.status, start, result.usage, result.errorType, attempted)
 		return result, true
 	}
 	return result, false
@@ -431,7 +451,7 @@ func (s *Service) forward(w http.ResponseWriter, r *http.Request, target string,
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		errType := router.Classify(resp.StatusCode, string(body))
-		unsupported := isUnsupportedOpenAIEndpoint(resp.StatusCode, body)
+		unsupported := errType != "model_unavailable" && isUnsupportedOpenAIEndpoint(resp.StatusCode, body)
 		return attemptResult{status: resp.StatusCode, errorType: errType, message: sanitizeUpstreamMessage(errorMessage(body, resp.Status), key.Secret), retryable: unsupported || router.Retryable(errType), retryAfterSeconds: retryAfter(resp.Header.Get("Retry-After")), endpointUnsupported: unsupported, ambiguous: resp.StatusCode >= 500}
 	}
 
@@ -480,7 +500,7 @@ func (s *Service) forward(w http.ResponseWriter, r *http.Request, target string,
 }
 
 func (s *Service) recordResponseAffinity(ctx context.Context, resourceIDs []string, key model.Key) {
-	if err := s.store.PutUpstreamAffinity(ctx, resourceIDs, key.ProviderID, key.ID); err != nil {
+	if err := s.store.PutUpstreamAffinity(ctx, resourceIDs, key.ProviderID, key.ID, key.UpstreamModel); err != nil {
 		slog.Warn("record upstream resource affinity failed", "key_id", key.ID, "error", err)
 	}
 }
@@ -623,7 +643,17 @@ func (s *Service) models(w http.ResponseWriter, r *http.Request) {
 		writeProxyStoreError(w, "load discovered models", err)
 		return
 	}
+	routes, err := s.store.ListModelRoutes(r.Context())
+	if err != nil {
+		writeProxyStoreError(w, "load model routes", err)
+		return
+	}
 	set := make(map[string]bool)
+	for _, route := range routes {
+		if route.Enabled && strings.TrimSpace(route.ID) != "" {
+			set[route.ID] = true
+		}
+	}
 	for _, p := range providers {
 		if !p.Enabled {
 			continue
@@ -694,13 +724,31 @@ func requestGatewayToken(r *http.Request) string {
 }
 
 func (s *Service) log(ctx context.Context, requestID, inbound, providerID, keyID, modelName string, status int, start time.Time, usage protocol.Usage, errType string) {
-	if errType != "" {
+	s.recordRequestLog(ctx, model.RequestLog{
+		RequestID: requestID, InboundProtocol: inbound, ProviderID: providerID, KeyID: keyID,
+		Model: modelName, Status: status, LatencyMS: time.Since(start).Milliseconds(),
+		PromptTokens: usage.PromptTokens, CompletionTokens: usage.CompletionTokens, TotalTokens: usage.TotalTokens,
+		ErrorType: errType,
+	})
+}
+
+func (s *Service) logCandidate(ctx context.Context, requestID, inbound string, key model.Key, modelName string, status int, start time.Time, usage protocol.Usage, errType string, attempts int) {
+	s.recordRequestLog(ctx, model.RequestLog{
+		RequestID: requestID, InboundProtocol: inbound, ProviderID: key.ProviderID, KeyID: key.ID,
+		Model: modelName, RouteID: key.RouteID, UpstreamModel: key.UpstreamModel, Attempts: attempts,
+		Status: status, LatencyMS: time.Since(start).Milliseconds(), PromptTokens: usage.PromptTokens,
+		CompletionTokens: usage.CompletionTokens, TotalTokens: usage.TotalTokens, ErrorType: errType,
+	})
+}
+
+func (s *Service) recordRequestLog(ctx context.Context, item model.RequestLog) {
+	if item.ErrorType != "" {
 		s.errorCountsMu.Lock()
-		s.errorCounts[errType]++
+		s.errorCounts[item.ErrorType]++
 		s.errorCountsMu.Unlock()
 	}
-	if err := s.store.LogRequest(ctx, model.RequestLog{RequestID: requestID, InboundProtocol: inbound, ProviderID: providerID, KeyID: keyID, Model: modelName, Status: status, LatencyMS: time.Since(start).Milliseconds(), PromptTokens: usage.PromptTokens, CompletionTokens: usage.CompletionTokens, TotalTokens: usage.TotalTokens, ErrorType: errType}); err != nil {
-		slog.Warn("record request log failed", "request_id", requestID, "error", err)
+	if err := s.store.LogRequest(ctx, item); err != nil {
+		slog.Warn("record request log failed", "request_id", item.RequestID, "error", err)
 	}
 }
 

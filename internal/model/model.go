@@ -48,6 +48,53 @@ type Key struct {
 	FailureCount        int               `json:"failureCount"`
 	LastUsedAt          *time.Time        `json:"lastUsedAt,omitempty"`
 	UpstreamModel       string            `json:"upstreamModel,omitempty"`
+	RouteID             string            `json:"routeId,omitempty"`
+	RouteModel          string            `json:"routeModel,omitempty"`
+	ModelPriority       int               `json:"modelPriority,omitempty"`
+	ModelCooldownUntil  *time.Time        `json:"modelCooldownUntil,omitempty"`
+}
+
+type ProviderModelDiscovery struct {
+	ProviderID    string     `json:"providerId"`
+	Status        string     `json:"status"`
+	ModelCount    int        `json:"modelCount"`
+	LastAttemptAt *time.Time `json:"lastAttemptAt,omitempty"`
+	LastSuccessAt *time.Time `json:"lastSuccessAt,omitempty"`
+	LastError     string     `json:"lastError,omitempty"`
+}
+
+type ProviderModelState struct {
+	ProviderID          string     `json:"providerId"`
+	ModelID             string     `json:"modelId"`
+	ConsecutiveFailures int        `json:"consecutiveFailures"`
+	CooldownUntil       *time.Time `json:"cooldownUntil,omitempty"`
+	LastError           string     `json:"lastError,omitempty"`
+	LastStatusCode      *int       `json:"lastStatusCode,omitempty"`
+	SuccessCount        int        `json:"successCount"`
+	FailureCount        int        `json:"failureCount"`
+	LastUsedAt          *time.Time `json:"lastUsedAt,omitempty"`
+}
+
+type ModelRouteTarget struct {
+	ProviderID    string `json:"providerId"`
+	UpstreamModel string `json:"upstreamModel"`
+	Enabled       bool   `json:"enabled"`
+}
+
+type ModelRouteModel struct {
+	Name     string             `json:"name"`
+	Priority int                `json:"priority"`
+	Enabled  bool               `json:"enabled"`
+	Targets  []ModelRouteTarget `json:"targets"`
+}
+
+type ModelRoute struct {
+	ID        string            `json:"id"`
+	Name      string            `json:"name"`
+	Enabled   bool              `json:"enabled"`
+	Models    []ModelRouteModel `json:"models"`
+	CreatedAt time.Time         `json:"createdAt"`
+	UpdatedAt time.Time         `json:"updatedAt"`
 }
 
 type GatewayKey struct {
@@ -69,6 +116,9 @@ type RequestLog struct {
 	ProviderID       string    `json:"providerId,omitempty"`
 	KeyID            string    `json:"keyId,omitempty"`
 	Model            string    `json:"model,omitempty"`
+	RouteID          string    `json:"routeId,omitempty"`
+	UpstreamModel    string    `json:"upstreamModel,omitempty"`
+	Attempts         int       `json:"attempts,omitempty"`
 	Status           int       `json:"status"`
 	LatencyMS        int64     `json:"latencyMs"`
 	PromptTokens     *int      `json:"promptTokens,omitempty"`

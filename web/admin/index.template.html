@@ -113,6 +113,8 @@
                 </div>
                 <div class="traffic-secondary">
                   <span :class="['traffic-model', { muted: !log.model || String(log.model).toLowerCase() === 'auto' }]">{{ logModelLabel(log.model) }}</span>
+                  <span v-if="log.upstreamModel && log.upstreamModel !== log.model" class="traffic-provider">{{ log.upstreamModel }}</span>
+                  <span v-if="log.attempts > 1" class="traffic-provider">{{ log.attempts }} {{ t('logs.attempts') }}</span>
                   <span v-if="log.providerId" class="traffic-provider">{{ log.providerId }}</span>
                   <span v-if="log.errorType" class="traffic-error">{{ log.errorType }}</span>
                 </div>
@@ -160,7 +162,7 @@
             </select>
             <input v-model.trim="providerForm.baseUrl" :placeholder="t('placeholder.baseUrl')">
             <input v-model.trim="providerForm.balancePath" :placeholder="t('placeholder.balancePath')">
-            <input v-model.number="providerForm.priority" type="number" :placeholder="t('placeholder.priority')">
+            <input v-model.number="providerForm.priority" type="number" min="0" max="1000" :placeholder="t('placeholder.priority')">
             <div class="model-select-field">
               <select v-model="providerForm.defaultModel">
                 <option value="">{{ t('model.useRequestDefault') }}</option>
@@ -180,7 +182,7 @@
             </div>
             <input v-if="!providerForm.editingId" v-model.trim="providerForm.firstKeyName" :placeholder="t('placeholder.firstKeyName')">
             <input v-if="!providerForm.editingId" v-model.trim="providerForm.firstKeySecret" type="password" :placeholder="t('placeholder.firstKeySecret')" autocomplete="off">
-            <input v-if="!providerForm.editingId" v-model.number="providerForm.firstKeyPriority" type="number" :placeholder="t('placeholder.keyPriority')">
+            <input v-if="!providerForm.editingId" v-model.number="providerForm.firstKeyPriority" type="number" min="0" max="1000" :placeholder="t('placeholder.keyPriority')">
             <details class="advanced-field">
               <summary>{{ t('provider.modelMapTitle') }}</summary>
               <p>{{ t('provider.modelMapCopy') }}</p>
@@ -227,7 +229,7 @@
                 </select>
                 <input v-model.trim="providerForm.baseUrl" :placeholder="t('placeholder.baseUrl')">
                 <input v-model.trim="providerForm.balancePath" :placeholder="t('placeholder.balancePath')">
-                <input v-model.number="providerForm.priority" type="number" :placeholder="t('placeholder.priority')">
+                <input v-model.number="providerForm.priority" type="number" min="0" max="1000" :placeholder="t('placeholder.priority')">
                 <div class="model-select-field">
                   <select v-model="providerForm.defaultModel">
                     <option value="">{{ t('model.useRequestDefault') }}</option>
@@ -271,6 +273,28 @@
                   <code>{{ providerApiEndpoint(p) }}</code>
                 </div>
               </div>
+              <div class="model-inventory">
+                <div class="model-inventory-head">
+                  <div>
+                    <div class="model-inventory-title">
+                      <strong>{{ t('model.inventory') }}</strong>
+                      <span :class="['pill', discoveryStatusClass(p.id)]">{{ discoveryStatusText(p.id) }}</span>
+                      <span class="pill">{{ providerDiscoveredModels(p.id).length }}</span>
+                    </div>
+                    <small v-if="discoveryForProvider(p.id).lastSuccessAt">{{ t('model.lastDiscovered') }} {{ formatGatewayTime(discoveryForProvider(p.id).lastSuccessAt) }}</small>
+                    <small v-else>{{ t('model.notDiscovered') }}</small>
+                  </div>
+                  <button class="ghost" type="button" :disabled="refreshingProviderId === p.id || !providerKeys(p.id).length" @click="refreshProviderModels(p)">
+                    {{ refreshingProviderId === p.id ? t('action.discoveringModels') : t('action.refreshModels') }}
+                  </button>
+                </div>
+                <div v-if="providerModelPreview(p.id).length" class="model-chip-list">
+                  <code v-for="model in providerModelPreview(p.id)" :key="model" class="model-chip">{{ model }}</code>
+                  <span v-if="providerDiscoveredModels(p.id).length > providerModelPreview(p.id).length" class="model-chip-more">+{{ providerDiscoveredModels(p.id).length - providerModelPreview(p.id).length }}</span>
+                </div>
+                <small v-else-if="discoveryForProvider(p.id).lastError" class="test-error">{{ discoveryForProvider(p.id).lastError }}</small>
+                <small v-else>{{ t('model.inventoryEmpty') }}</small>
+              </div>
               <form v-if="keyFormOpen && !keyForm.editingId && keyForm.providerId === p.id" class="form-grid inline-edit-form key-inline-form" data-testid="key-form" @submit.prevent="saveKey">
                 <div class="inline-form-heading">
                   <strong>{{ t('action.addKey') }}</strong>
@@ -282,7 +306,7 @@
                 </select>
                 <input v-model.trim="keyForm.name" :placeholder="t('placeholder.keyDisplayName')">
                 <input v-model.trim="keyForm.secret" type="password" :placeholder="t('placeholder.secret')" autocomplete="off">
-                <input v-model.number="keyForm.priority" type="number" :placeholder="t('placeholder.priority')">
+                <input v-model.number="keyForm.priority" type="number" min="0" max="1000" :placeholder="t('placeholder.priority')">
                 <div class="model-select-field">
                   <select v-model="keyForm.defaultModel">
                     <option value="">{{ t('model.useRequestDefault') }}</option>
@@ -321,7 +345,7 @@
                     </select>
                     <input v-model.trim="keyForm.name" :placeholder="t('placeholder.keyDisplayName')">
                     <input v-model.trim="keyForm.secret" type="password" :placeholder="t('placeholder.secretKeep')" autocomplete="off">
-                    <input v-model.number="keyForm.priority" type="number" :placeholder="t('placeholder.priority')">
+                    <input v-model.number="keyForm.priority" type="number" min="0" max="1000" :placeholder="t('placeholder.priority')">
                     <div class="model-select-field">
                       <select v-model="keyForm.defaultModel">
                         <option value="">{{ t('model.useRequestDefault') }}</option>
@@ -420,6 +444,106 @@
                 </tr>
               </tbody>
             </table>
+          </div>
+        </article>
+      </section>
+
+      <section v-show="activeSection === 'model-routing'" class="section">
+        <article class="panel model-routing-panel">
+          <div class="panel-title section-actions model-routing-heading">
+            <div>
+              <h2>{{ t('modelRouting.title') }}</h2>
+              <small>{{ t('modelRouting.copy') }}</small>
+            </div>
+            <button type="button" @click="openModelRouteForm()">{{ t('action.addModelRoute') }}</button>
+          </div>
+
+          <form v-if="modelRouteFormOpen" class="model-route-editor" data-testid="model-route-form" @submit.prevent="saveModelRoute">
+            <div class="model-route-editor-head">
+              <div>
+                <strong>{{ t(modelRouteForm.editingId ? 'modelRouting.editTitle' : 'modelRouting.createTitle') }}</strong>
+                <small>{{ t('modelRouting.orderRule') }}</small>
+              </div>
+              <label class="check"><input v-model="modelRouteForm.enabled" type="checkbox"> {{ t('status.enabled') }}</label>
+            </div>
+            <div v-if="formError" class="form-error">{{ formError }}</div>
+            <div class="model-route-identity">
+              <label><span>{{ t('modelRouting.publicModel') }}</span><input v-model.trim="modelRouteForm.id" :disabled="!!modelRouteForm.editingId" maxlength="512" required></label>
+              <label><span>{{ t('table.name') }}</span><input v-model.trim="modelRouteForm.name" maxlength="256"></label>
+            </div>
+
+            <div class="route-model-list">
+              <div v-for="(routeModel, modelIndex) in modelRouteForm.models" :key="modelIndex" class="route-model-row">
+                <div class="route-model-main">
+                  <span class="route-order">{{ String(modelIndex + 1).padStart(2, '0') }}</span>
+                  <label><span>{{ t('modelRouting.fallbackModel') }}</span><input v-model.trim="routeModel.name" maxlength="512" required></label>
+                  <label class="priority-field"><span>{{ t('table.priority') }}</span><input v-model.number="routeModel.priority" type="number" min="0" max="1000"></label>
+                  <label class="check"><input v-model="routeModel.enabled" type="checkbox"> {{ t('status.enabled') }}</label>
+                  <button class="icon-button danger" type="button" :aria-label="t('action.removeModel')" :title="t('action.removeModel')" @click="removeRouteModel(modelIndex)">×</button>
+                </div>
+                <div class="route-target-list">
+                  <div v-for="(target, targetIndex) in routeModel.targets" :key="targetIndex" class="route-target-row">
+                    <span class="target-branch" aria-hidden="true"></span>
+                    <select v-model="target.providerId" :aria-label="t('table.provider')" required>
+                      <option value="" disabled>{{ t('placeholder.selectProvider') }}</option>
+                      <option v-for="provider in providers" :key="provider.id" :value="provider.id">{{ provider.name }} · P{{ provider.priority }}</option>
+                    </select>
+                    <input v-model.trim="target.upstreamModel" :list="`route-models-${modelIndex}-${targetIndex}`" :aria-label="t('modelRouting.upstreamModel')" :placeholder="t('modelRouting.upstreamModel')" maxlength="512" required>
+                    <datalist :id="`route-models-${modelIndex}-${targetIndex}`">
+                      <option v-for="model in providerModelOptions(target.providerId)" :key="model" :value="model"></option>
+                    </datalist>
+                    <label class="check"><input v-model="target.enabled" type="checkbox"> {{ t('status.enabled') }}</label>
+                    <button class="icon-button ghost" type="button" :aria-label="t('action.removeTarget')" :title="t('action.removeTarget')" @click="removeRouteTarget(modelIndex, targetIndex)">×</button>
+                  </div>
+                  <button class="ghost add-target-button" type="button" @click="addRouteTarget(modelIndex)">+ {{ t('action.addTarget') }}</button>
+                </div>
+              </div>
+            </div>
+            <button class="ghost add-route-model-button" type="button" @click="addRouteModel">+ {{ t('action.addFallbackModel') }}</button>
+            <div class="form-actions model-route-actions">
+              <button class="ghost" type="button" @click="cancelModelRouteForm">{{ t('action.cancel') }}</button>
+              <button type="submit">{{ t('action.saveModelRoute') }}</button>
+            </div>
+          </form>
+
+          <div v-if="modelRoutes.length" class="model-route-list">
+            <article v-for="route in modelRoutes" :key="route.id" class="model-route-item">
+              <div class="model-route-summary">
+                <div>
+                  <div class="provider-title-row">
+                    <code>{{ route.id }}</code>
+                    <span :class="['pill', route.enabled ? 'ok' : 'bad']">{{ route.enabled ? t('status.enabled') : t('status.disabled') }}</span>
+                  </div>
+                  <h3>{{ route.name || route.id }}</h3>
+                </div>
+                <div class="provider-actions">
+                  <button class="ghost" type="button" @click="openModelRouteForm(route)">{{ t('action.edit') }}</button>
+                  <button class="ghost" type="button" @click="toggleModelRoute(route)">{{ route.enabled ? t('action.disable') : t('action.enable') }}</button>
+                  <button class="danger" type="button" @click="deleteModelRoute(route)">{{ t('action.delete') }}</button>
+                </div>
+              </div>
+              <div class="route-ladder">
+                <div v-for="(routeModel, modelIndex) in route.models" :key="routeModel.name" :class="['route-ladder-step', {disabled: !routeModel.enabled}]">
+                  <span class="route-order">{{ String(modelIndex + 1).padStart(2, '0') }}</span>
+                  <div class="route-ladder-model">
+                    <strong>{{ routeModel.name }}</strong>
+                    <small>{{ t('table.priority') }} {{ routeModel.priority }}</small>
+                  </div>
+                  <div class="route-target-chips">
+                    <span v-for="target in routeModel.targets" :key="target.providerId + ':' + target.upstreamModel" :class="['route-target-chip', {disabled: !target.enabled}]">
+                      <strong>{{ providerDisplayName(target.providerId) }}</strong>
+                      <code>{{ target.upstreamModel }}</code>
+                      <small v-if="modelStateFor(target.providerId, target.upstreamModel)?.cooldownUntil">{{ t('status.cooling') }}</small>
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </article>
+          </div>
+          <div v-else-if="!modelRouteFormOpen" class="empty-state compact-empty">
+            <strong>{{ t('modelRouting.empty') }}</strong>
+            <small>{{ t('modelRouting.emptyCopy') }}</small>
+            <button type="button" @click="openModelRouteForm()">{{ t('action.addModelRoute') }}</button>
           </div>
         </article>
       </section>
@@ -598,7 +722,11 @@
                 <tr v-for="log in logs" :key="log.id">
                   <td>{{ formatGatewayTime(log.createdAt) }}</td>
                   <td>{{ log.inboundProtocol }}</td>
-                  <td>{{ log.model || '-' }}</td>
+                  <td class="log-model-cell">
+                    <code>{{ log.model || '-' }}</code>
+                    <small v-if="log.upstreamModel && log.upstreamModel !== log.model">{{ log.upstreamModel }}</small>
+                    <small v-if="log.routeId">{{ log.routeId }} · {{ log.attempts || 1 }} {{ t('logs.attempts') }}</small>
+                  </td>
                   <td>{{ log.providerId || '-' }}</td>
                   <td>{{ log.keyId || '-' }}</td>
                   <td>{{ log.status }}</td>

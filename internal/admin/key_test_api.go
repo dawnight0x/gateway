@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -87,12 +88,28 @@ func (s *Service) testUpstreamKey(ctx context.Context, id string) keyTestResult 
 }
 
 func (s *Service) tryTestKeyPath(ctx context.Context, key model.Key, path string) keyTestResult {
-	result := keyTestResult{
+	result := s.discoverModelsAtPath(ctx, key, path)
+	if result.Status == "ok" {
+		s.tryTokenProbe(ctx, key, &result)
+	}
+	return result
+}
+
+func (s *Service) discoverModelsAtPath(ctx context.Context, key model.Key, path string) (result keyTestResult) {
+	result = keyTestResult{
 		ProviderID: key.ProviderID,
 		KeyID:      key.ID,
 		Status:     "unknown",
 		CheckedAt:  time.Now().UTC().Format(time.RFC3339),
 	}
+	defer func() {
+		if result.Status == "ok" {
+			return
+		}
+		if err := s.store.RecordProviderModelDiscoveryFailure(ctx, key.ProviderID, result.Status, result.Error); err != nil {
+			slog.Warn("record model discovery failure failed", "provider_id", key.ProviderID, "error", err)
+		}
+	}()
 	endpoint, err := joinURL(key.ProviderBaseURL, path)
 	if err != nil {
 		result.Status = "config_error"
@@ -100,8 +117,8 @@ func (s *Service) tryTestKeyPath(ctx context.Context, key model.Key, path string
 		return result
 	}
 	result.Endpoint = endpoint
-	timeoutSeconds := s.cfg.Routing.TimeoutSeconds
-	if timeoutSeconds <= 0 || timeoutSeconds > 30 {
+	timeoutSeconds := s.cfg.ModelDiscovery.TimeoutSeconds
+	if timeoutSeconds <= 0 || timeoutSeconds > 120 {
 		timeoutSeconds = 30
 	}
 	client := keyTestHTTPClient(timeoutSeconds)
@@ -161,13 +178,22 @@ func (s *Service) tryTestKeyPath(ctx context.Context, key model.Key, path string
 	result.ConnectionStatus = "ok"
 	result.ModelCount = count
 	result.Models = trimModelList(models, 300)
+	if len(models) == 0 {
+		result.Status = "empty"
+		result.Error = "model endpoint returned no models"
+		return result
+	}
 	if err := s.store.ReplaceProviderModels(ctx, key.ProviderID, models); err != nil {
 		result.Status = "storage_error"
 		result.Error = "connected successfully but failed to cache discovered models"
 		return result
 	}
+	if err := s.store.RecordProviderModelDiscoverySuccess(ctx, key.ProviderID, len(models)); err != nil {
+		result.Status = "storage_error"
+		result.Error = "connected successfully but failed to save model discovery state"
+		return result
+	}
 	result.Model = selectProbeModel(key, models)
-	s.tryTokenProbe(ctx, key, &result)
 	return result
 }
 
