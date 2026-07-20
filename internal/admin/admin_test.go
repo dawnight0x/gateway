@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -475,6 +476,7 @@ func TestAdminRefreshesProviderModelsWithoutTokenProbeAndRetainsInventoryOnEmpty
 
 	empty.Store(true)
 	res = authorizedAdminRequest(t, svc, http.MethodPost, "/admin/api/providers/provider/models", `{}`)
+	result = keyTestResult{}
 	if err := json.NewDecoder(res.Body).Decode(&result); err != nil {
 		t.Fatal(err)
 	}
@@ -487,6 +489,141 @@ func TestAdminRefreshesProviderModelsWithoutTokenProbeAndRetainsInventoryOnEmpty
 	}
 	if got := inventory["provider"]; len(got) != 2 || got[0] != "model-a" || got[1] != "model-b" {
 		t.Fatalf("retained inventory = %#v", got)
+	}
+}
+
+func TestAdminDiscoversPaginatedGeminiModelsWithVersionedBase(t *testing.T) {
+	var requests []string
+	var failSecondPage atomic.Bool
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests = append(requests, r.URL.RequestURI())
+		if r.Method != http.MethodGet || r.URL.Path != "/v1beta/models" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+		}
+		if r.Header.Get("x-goog-api-key") != "gemini-secret" {
+			t.Fatalf("google api key = %q", r.Header.Get("x-goog-api-key"))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Query().Get("pageToken") == "" {
+			_, _ = w.Write([]byte(`{"models":[{"name":"models/gemini-b"}],"nextPageToken":"page-2"}`))
+			return
+		}
+		if r.URL.Query().Get("pageToken") != "page-2" {
+			t.Fatalf("page token = %q", r.URL.Query().Get("pageToken"))
+		}
+		if failSecondPage.Load() {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte(`{"error":{"message":"temporary"}}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"models":[{"name":"models/gemini-a"}]}`))
+	}))
+	defer upstream.Close()
+
+	st := testAdminStore(t)
+	ctx := context.Background()
+	_, err := st.UpsertProvider(ctx, model.Provider{ID: "gemini", Name: "gemini", Type: model.ProviderGeminiCompatible, BaseURL: upstream.URL + "/v1beta", Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	key, err := st.UpsertKey(ctx, model.Key{ID: "gemini-key", ProviderID: "gemini", Name: "gemini", Secret: "gemini-secret", Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := New(st, config.Default()).refreshProviderModels(ctx, "gemini")
+	if result.Status != "ok" || result.ModelCount == nil || *result.ModelCount != 2 {
+		t.Fatalf("discovery result = %#v", result)
+	}
+	if len(requests) != 2 || requests[0] != "/v1beta/models" || requests[1] != "/v1beta/models?pageToken=page-2" {
+		t.Fatalf("requests = %#v", requests)
+	}
+	inventory, err := st.ListProviderModels(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := inventory["gemini"]; len(got) != 2 || got[0] != "gemini-a" || got[1] != "gemini-b" {
+		t.Fatalf("Gemini inventory = %#v", got)
+	}
+	failSecondPage.Store(true)
+	result = New(st, config.Default()).refreshProviderModels(ctx, "gemini")
+	if result.Status != "server_error" {
+		t.Fatalf("failed pagination result = %#v", result)
+	}
+	inventory, err = st.ListProviderModels(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := inventory["gemini"]; len(got) != 2 || got[0] != "gemini-a" || got[1] != "gemini-b" {
+		t.Fatalf("inventory after failed page = %#v", got)
+	}
+	endpoint, _, err := tokenProbeRequest(key, "models/gemini-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := url.Parse(endpoint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parsed.EscapedPath() != "/v1beta/models/gemini-a:generateContent" {
+		t.Fatalf("token probe endpoint = %s", endpoint)
+	}
+}
+
+func TestProviderModelDiscoveryFallsBackToNextEnabledKey(t *testing.T) {
+	var calls atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		if r.Header.Get("Authorization") == "Bearer bad" {
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"error":{"message":"invalid key"}}`))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[{"id":"model-a"}]}`))
+	}))
+	defer upstream.Close()
+
+	st := testAdminStore(t)
+	ctx := context.Background()
+	_, _ = st.UpsertProvider(ctx, model.Provider{ID: "provider", Name: "provider", Type: model.ProviderOpenAICompatible, BaseURL: upstream.URL + "/v1", Enabled: true})
+	_, _ = st.UpsertKey(ctx, model.Key{ID: "bad", ProviderID: "provider", Name: "bad", Secret: "bad", Priority: 100, Enabled: true})
+	_, _ = st.UpsertKey(ctx, model.Key{ID: "good", ProviderID: "provider", Name: "good", Secret: "good", Priority: 10, Enabled: true})
+
+	result := New(st, config.Default()).refreshProviderModels(ctx, "provider")
+	if result.Status != "partial" || result.KeyID != "good" || !strings.Contains(result.Error, "bad (auth_error)") || calls.Load() != 2 {
+		t.Fatalf("result = %#v, calls = %d", result, calls.Load())
+	}
+}
+
+func TestProviderModelDiscoveryUnionsSuccessfulKeyInventories(t *testing.T) {
+	var calls atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		modelID := "model-a"
+		if r.Header.Get("Authorization") == "Bearer second" {
+			modelID = "model-b"
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[{"id":"` + modelID + `"}]}`))
+	}))
+	defer upstream.Close()
+
+	st := testAdminStore(t)
+	ctx := context.Background()
+	_, _ = st.UpsertProvider(ctx, model.Provider{ID: "provider", Name: "provider", Type: model.ProviderOpenAICompatible, BaseURL: upstream.URL + "/v1", Enabled: true})
+	_, _ = st.UpsertKey(ctx, model.Key{ID: "first", ProviderID: "provider", Name: "first", Secret: "first", Priority: 100, Enabled: true})
+	_, _ = st.UpsertKey(ctx, model.Key{ID: "second", ProviderID: "provider", Name: "second", Secret: "second", Priority: 10, Enabled: true})
+
+	result := New(st, config.Default()).refreshProviderModels(ctx, "provider")
+	if result.Status != "ok" || result.ModelCount == nil || *result.ModelCount != 2 || calls.Load() != 2 {
+		t.Fatalf("result = %#v, calls = %d", result, calls.Load())
+	}
+	inventory, err := st.ListProviderModels(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := inventory["provider"]; len(got) != 2 || got[0] != "model-a" || got[1] != "model-b" {
+		t.Fatalf("union inventory = %#v", got)
 	}
 }
 
@@ -532,6 +669,10 @@ func TestAdminModelRouteCRUDAndValidation(t *testing.T) {
 	if res.Code != http.StatusBadRequest || !strings.Contains(res.Body.String(), "does not exist") {
 		t.Fatalf("missing provider validation status = %d, body = %s", res.Code, res.Body.String())
 	}
+	res = authorizedAdminRequest(t, svc, http.MethodPost, "/admin/api/model-routes", `{"id":"ambiguous","enabled":true,"models":[{"name":"primary","priority":1,"enabled":true,"targets":[{"providerId":"high","upstreamModel":"model-a","enabled":true},{"providerId":"high","upstreamModel":"model-b","enabled":true}]}]}`)
+	if res.Code != http.StatusBadRequest || !strings.Contains(res.Body.String(), "only one target") {
+		t.Fatalf("duplicate provider target validation status = %d, body = %s", res.Code, res.Body.String())
+	}
 	res = authorizedAdminRequest(t, svc, http.MethodDelete, "/admin/api/model-routes/coding-auto", "")
 	if res.Code != http.StatusOK {
 		t.Fatalf("delete route status = %d, body = %s", res.Code, res.Body.String())
@@ -539,6 +680,55 @@ func TestAdminModelRouteCRUDAndValidation(t *testing.T) {
 	res = authorizedAdminRequest(t, svc, http.MethodGet, "/admin/api/model-routes/coding-auto", "")
 	if res.Code != http.StatusNotFound {
 		t.Fatalf("deleted route status = %d, body = %s", res.Code, res.Body.String())
+	}
+}
+
+func TestAdminResetsProviderModelHealth(t *testing.T) {
+	st := testAdminStore(t)
+	ctx := context.Background()
+	_, _ = st.UpsertProvider(ctx, model.Provider{ID: "provider", Name: "provider", Type: model.ProviderOpenAICompatible, BaseURL: "https://provider.example", Enabled: true})
+	_, _ = st.UpsertKey(ctx, model.Key{ID: "key", ProviderID: "provider", Name: "key", Secret: "secret", Enabled: true})
+	status := http.StatusNotFound
+	if err := st.RecordProviderModelFailure(ctx, "provider", "key", "model-a", &status, "model not found", store.FailurePolicy{Threshold: 1, ForceCooldown: true}); err != nil {
+		t.Fatal(err)
+	}
+
+	svc := New(st, config.Default())
+	res := authorizedAdminRequest(t, svc, http.MethodPost, "/admin/api/model-states/reset", `{"providerId":"provider","modelId":"model-a"}`)
+	if res.Code != http.StatusOK {
+		t.Fatalf("reset status = %d, body = %s", res.Code, res.Body.String())
+	}
+	states, err := st.ListProviderModelStates(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(states) != 1 || states[0].KeyID != "key" || states[0].ConsecutiveFailures != 0 || states[0].CooldownUntil != nil || states[0].LastError != "" {
+		t.Fatalf("states after reset = %#v", states)
+	}
+}
+
+func TestAdminNormalizesGeminiModelRouteTarget(t *testing.T) {
+	st := testAdminStore(t)
+	ctx := context.Background()
+	if _, err := st.UpsertProvider(ctx, model.Provider{ID: "gemini", Name: "gemini", Type: model.ProviderGeminiCompatible, BaseURL: "https://generativelanguage.googleapis.com", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	svc := New(st, config.Default())
+	res := authorizedAdminRequest(t, svc, http.MethodPost, "/admin/api/model-routes", `{
+		"id":"gemini-auto","enabled":true,
+		"models":[{"name":"primary","priority":100,"enabled":true,"targets":[
+			{"providerId":"gemini","upstreamModel":"models/gemini-2.0-flash","enabled":true}
+		]}]
+	}`)
+	if res.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", res.Code, res.Body.String())
+	}
+	var route model.ModelRoute
+	if err := json.NewDecoder(res.Body).Decode(&route); err != nil {
+		t.Fatal(err)
+	}
+	if got := route.Models[0].Targets[0].UpstreamModel; got != "gemini-2.0-flash" {
+		t.Fatalf("normalized model = %q", got)
 	}
 }
 
@@ -631,14 +821,16 @@ func TestAdminPatchesProviderAndKeyForEditing(t *testing.T) {
 
 	ctx := context.Background()
 	_, err = st.UpsertProvider(ctx, model.Provider{
-		ID:          "newapi",
-		Name:        "old",
-		Type:        model.ProviderNewAPI,
-		BaseURL:     "https://old.example/v1",
-		Priority:    3,
-		Enabled:     false,
-		ModelMap:    map[string]string{"old": "model"},
-		BalancePath: "/api/user/self",
+		ID:                    "newapi",
+		Name:                  "old",
+		Type:                  model.ProviderNewAPI,
+		BaseURL:               "https://old.example/v1",
+		Priority:              3,
+		Enabled:               false,
+		ModelMap:              map[string]string{"old": "model"},
+		ModelAllowlistEnabled: true,
+		ModelAllowlist:        []string{"model-a"},
+		BalancePath:           "/api/user/self",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -668,8 +860,20 @@ func TestAdminPatchesProviderAndKeyForEditing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if provider == nil || provider.BaseURL != "https://new.example/v1" || provider.BalancePath != "" || provider.Priority != 7 || provider.Enabled {
+	if provider == nil || provider.BaseURL != "https://new.example/v1" || provider.BalancePath != "" || provider.Priority != 7 || provider.Enabled || !provider.ModelAllowlistEnabled || len(provider.ModelAllowlist) != 1 || provider.ModelAllowlist[0] != "model-a" {
 		t.Fatalf("provider = %#v", provider)
+	}
+
+	res = authorizedAdminRequest(t, svc, http.MethodPatch, "/admin/api/providers/newapi", `{"modelAllowlistEnabled":true,"modelAllowlist":["model-b","model-b"," model-c "]}`)
+	if res.Code != http.StatusOK {
+		t.Fatalf("provider allowlist patch expected 200, got %d: %s", res.Code, res.Body.String())
+	}
+	provider, err = st.GetProvider(ctx, "newapi")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(provider.ModelAllowlist) != 2 || provider.ModelAllowlist[0] != "model-b" || provider.ModelAllowlist[1] != "model-c" {
+		t.Fatalf("provider allowlist = %#v", provider.ModelAllowlist)
 	}
 
 	req = httptest.NewRequest(http.MethodPatch, "http://localhost:18787/admin/api/keys/k1", strings.NewReader(`{"name":"new-key","secret":"","priority":9}`))
@@ -755,6 +959,21 @@ func TestParseModelCountSupportsNestedNewAPIShapes(t *testing.T) {
 				t.Fatalf("count = %#v, want %d", count, tt.want)
 			}
 		})
+	}
+}
+
+func TestParseModelPageSupportsAnthropicCursor(t *testing.T) {
+	models, count, cursor, err := parseModelPage([]byte(`{
+		"data":[{"id":"claude-sonnet"}],"has_more":true,"last_id":"claude-sonnet"
+	}`), model.ProviderAnthropicCompatible)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(models) != 1 || models[0] != "claude-sonnet" || count == nil || *count != 1 {
+		t.Fatalf("models = %#v, count = %#v", models, count)
+	}
+	if cursor == nil || cursor.QueryParam != "after_id" || cursor.Value != "claude-sonnet" {
+		t.Fatalf("cursor = %#v", cursor)
 	}
 }
 

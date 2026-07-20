@@ -56,6 +56,7 @@ type RoutingConfig struct {
 	StreamWriteTimeoutSeconds  int  `yaml:"stream_write_timeout_seconds" json:"streamWriteTimeoutSeconds"`
 	StreamRetryBeforeFirstByte bool `yaml:"stream_retry_before_first_byte" json:"streamRetryBeforeFirstByte"`
 	RetryAmbiguousErrors       bool `yaml:"retry_ambiguous_errors" json:"retryAmbiguousErrors"`
+	FallbackOnBusy             bool `yaml:"fallback_on_busy" json:"fallbackOnBusy"`
 	AllowInsecureUpstreams     bool `yaml:"allow_insecure_upstreams" json:"allowInsecureUpstreams"`
 	MaxConcurrentRequests      int  `yaml:"max_concurrent_requests" json:"maxConcurrentRequests"`
 	MaxConcurrentPerProvider   int  `yaml:"max_concurrent_per_provider" json:"maxConcurrentPerProvider"`
@@ -113,6 +114,7 @@ func Default() Config {
 			StreamWriteTimeoutSeconds:  30,
 			StreamRetryBeforeFirstByte: true,
 			RetryAmbiguousErrors:       false,
+			FallbackOnBusy:             false,
 			AllowInsecureUpstreams:     false,
 			MaxConcurrentRequests:      64,
 			MaxConcurrentPerProvider:   16,
@@ -202,6 +204,7 @@ func Load() (Config, error) {
 		{"GATEWAY_OPEN_BROWSER_ON_DUPLICATE", &cfg.Server.OpenBrowserOnDuplicate},
 		{"GATEWAY_STREAM_RETRY_BEFORE_FIRST_BYTE", &cfg.Routing.StreamRetryBeforeFirstByte},
 		{"GATEWAY_RETRY_AMBIGUOUS_ERRORS", &cfg.Routing.RetryAmbiguousErrors},
+		{"GATEWAY_FALLBACK_ON_BUSY", &cfg.Routing.FallbackOnBusy},
 		{"GATEWAY_ALLOW_INSECURE_UPSTREAMS", &cfg.Routing.AllowInsecureUpstreams},
 		{"GATEWAY_ALLOW_REMOTE", &cfg.Server.AllowRemote},
 		{"GATEWAY_ALLOW_INSECURE_REMOTE", &cfg.Server.AllowInsecureRemote},

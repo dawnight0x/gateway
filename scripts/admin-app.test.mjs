@@ -202,7 +202,7 @@ test('key edit and routing save send the current form state', async () => {
   const harness = createHarness({
     fetchImpl: async (url, options = {}) => {
       requests.push({ url, options });
-      if (url === '/admin/api/routing') return response({ routing: { retryPerRequest: 4 }, restartRequired: true });
+      if (url === '/admin/api/routing') return response({ routing: { retryPerRequest: 4, fallbackOnBusy: false }, restartRequired: true });
       if (url === '/admin/api/dashboard') return response({ providers: [provider], keys: [] });
       return response({});
     },
@@ -212,7 +212,7 @@ test('key edit and routing save send the current form state', async () => {
   harness.exposed.keyForm.name = 'Primary updated';
   harness.exposed.keyForm.priority = 5;
   await harness.exposed.saveKey();
-  harness.exposed.routing.value = { retryPerRequest: 4 };
+  harness.exposed.routing.value = { retryPerRequest: 4, fallbackOnBusy: false };
   await harness.exposed.saveRouting();
 
   const keyRequest = requests.find((item) => item.url === '/admin/api/keys/key-1');
@@ -221,7 +221,7 @@ test('key edit and routing save send the current form state', async () => {
   assert.equal(JSON.parse(keyRequest.options.body).name, 'Primary updated');
   assert.equal(JSON.parse(keyRequest.options.body).priority, 5);
   assert.equal(routingRequest.options.method, 'PATCH');
-  assert.deepEqual(JSON.parse(routingRequest.options.body), { retryPerRequest: 4 });
+  assert.deepEqual(JSON.parse(routingRequest.options.body), { retryPerRequest: 4, fallbackOnBusy: false });
   assert.equal(harness.exposed.routing.value.retryPerRequest, 4);
   assert.equal(harness.exposed.routingMessage.value, 'routing.restartRequired');
 });
@@ -243,7 +243,10 @@ test('dashboard refresh restores persisted model inventories and routes', async 
         providerModels: { acme: ['gpt-primary', 'gpt-fallback'] },
         modelDiscovery: { acme: { providerId: 'acme', status: 'ok', modelCount: 2 } },
         modelRoutes: [route],
-        modelStates: [{ providerId: 'acme', modelId: 'gpt-primary', failureCount: 1 }],
+        modelStates: [
+          { providerId: 'acme', keyId: 'key-a', modelId: 'gpt-primary', failureCount: 1, consecutiveFailures: 1, cooldownUntil: '2999-01-01T00:00:00Z' },
+          { providerId: 'acme', keyId: 'key-b', modelId: 'gpt-primary', failureCount: 1, consecutiveFailures: 1, cooldownUntil: '2000-01-01T00:00:00Z' },
+        ],
       });
     },
   });
@@ -253,7 +256,27 @@ test('dashboard refresh restores persisted model inventories and routes', async 
   assert.deepEqual([...harness.exposed.providerDiscoveredModels('acme')], ['gpt-primary', 'gpt-fallback']);
   assert.equal(harness.exposed.discoveryForProvider('acme').status, 'ok');
   assert.equal(harness.exposed.modelRoutes.value[0].id, 'coding-auto');
-  assert.equal(harness.exposed.modelStateFor('acme', 'gpt-primary').failureCount, 1);
+  assert.equal(harness.exposed.modelCoolingCount('acme', 'gpt-primary'), 1);
+  assert.equal(harness.exposed.modelHasFailureState('acme', 'gpt-primary'), true);
+});
+
+test('model health reset targets every key for a provider model', async () => {
+  const requests = [];
+  const harness = createHarness({
+    fetchImpl: async (url, options = {}) => {
+      requests.push({ url, options });
+      if (url === '/admin/api/model-states/reset') return response({ ok: true });
+      if (url === '/admin/api/dashboard') return response({ modelStates: [] });
+      return response({});
+    },
+  });
+  await harness.mounted[0]();
+
+  await harness.exposed.resetModelState('acme', 'gpt-primary');
+
+  const request = requests.find((item) => item.url === '/admin/api/model-states/reset');
+  assert.equal(request.options.method, 'POST');
+  assert.deepEqual(JSON.parse(request.options.body), { providerId: 'acme', modelId: 'gpt-primary' });
 });
 
 test('model route form sends nested model and provider priorities', async () => {
@@ -318,6 +341,26 @@ test('adding a fallback model never creates a negative priority', () => {
   assert.equal(harness.exposed.modelRouteForm.models[1].priority, 0);
 });
 
+test('adding a route target selects an unused provider in the same model tier', async () => {
+  const harness = createHarness({
+    fetchImpl: async () => response({
+      providers: [
+        { id: 'first', name: 'First', enabled: true, modelMap: {} },
+        { id: 'second', name: 'Second', enabled: true, modelMap: {} },
+      ],
+      providerModels: { first: ['model-a'], second: ['model-b'] },
+    }),
+  });
+  await harness.mounted[0]();
+  harness.exposed.openModelRouteForm();
+
+  harness.exposed.addRouteTarget(0);
+
+  assert.equal(harness.exposed.modelRouteForm.models[0].targets[0].providerId, 'first');
+  assert.equal(harness.exposed.modelRouteForm.models[0].targets[1].providerId, 'second');
+  assert.equal(harness.exposed.routeProviderSelected(0, 1, 'first'), true);
+});
+
 test('provider model refresh calls the discovery-only endpoint', async () => {
   const requests = [];
   const provider = { id: 'acme', name: 'Acme', enabled: true, modelMap: {} };
@@ -342,6 +385,68 @@ test('provider model refresh calls the discovery-only endpoint', async () => {
   assert.equal(request.options.body, '{}');
   assert.deepEqual([...harness.exposed.providerDiscoveredModels('acme')], ['gpt-primary']);
   assert.equal(harness.exposed.refreshingProviderId.value, '');
+});
+
+test('flagship recommendation recognizes leading model families and excludes utility models', () => {
+  const harness = createHarness();
+  for (const model of [
+    'moonshotai/kimi-k2.6',
+    'deepseek-ai/deepseek-v4-flash',
+    'deepseek-ai/deepseek-v4-pro',
+    'minimaxai/minimax-m3',
+    'z-ai/glm-5.2',
+    'grok-4.5',
+    'openai/gpt-5.2',
+    'anthropic/claude-opus-4',
+  ]) {
+    assert.equal(harness.exposed.isFlagshipModel(model), true, model);
+  }
+  assert.equal(harness.exposed.isFlagshipModel('text-embedding-3-large'), false);
+  assert.equal(harness.exposed.isFlagshipModel('vendor/legacy-chat-small'), false);
+});
+
+test('flagship quick selection persists a provider model allowlist', async () => {
+  const requests = [];
+  let provider = {
+    id: 'acme', name: 'Acme', type: 'openai-compatible', baseUrl: 'https://api.example/v1',
+    enabled: true, modelMap: {}, modelAllowlistEnabled: false, modelAllowlist: [],
+  };
+  const models = ['moonshotai/kimi-k2.6', 'deepseek-ai/deepseek-v4-flash', 'text-embedding-3-large', 'legacy-chat-small'];
+  const harness = createHarness({
+    fetchImpl: async (url, options = {}) => {
+      requests.push({ url, options });
+      if (url === '/admin/api/providers/acme') {
+        const patch = JSON.parse(options.body);
+        provider = { ...provider, ...patch };
+        return response(provider);
+      }
+      if (url === '/admin/api/dashboard') {
+        return response({ providers: [provider], keys: [], providerModels: { acme: models } });
+      }
+      return response({});
+    },
+  });
+  await harness.mounted[0]();
+
+  assert.deepEqual([...harness.exposed.modelPolicyDraft('acme').models].sort(), [...models].sort());
+  assert.equal(harness.exposed.modelPolicyDraft('acme').enabled, false);
+
+  harness.exposed.selectProviderModels('acme', 'flagship');
+  assert.equal(harness.exposed.modelPolicyDraft('acme').enabled, true);
+  assert.deepEqual(
+    [...harness.exposed.modelPolicyDraft('acme').models].sort(),
+    ['deepseek-ai/deepseek-v4-flash', 'moonshotai/kimi-k2.6'].sort(),
+  );
+  await harness.exposed.saveProviderModelPolicy(provider);
+
+  const request = requests.find((item) => item.url === '/admin/api/providers/acme');
+  assert.equal(request.options.method, 'PATCH');
+  assert.deepEqual(JSON.parse(request.options.body), {
+    modelAllowlistEnabled: true,
+    modelAllowlist: ['deepseek-ai/deepseek-v4-flash', 'moonshotai/kimi-k2.6'],
+  });
+  assert.equal(harness.exposed.modelPolicyDraft('acme').dirty, false);
+  assert.equal(harness.exposed.modelPolicyDraft('acme').enabled, true);
 });
 
 test('database and portable backup actions download files and clear passphrases', async () => {

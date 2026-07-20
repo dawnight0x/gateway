@@ -179,7 +179,7 @@ func TestModelRouteExhaustsProvidersBeforeFallbackModel(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := config.Default()
-	cfg.Routing.RetryPerRequest = 4
+	cfg.Routing.RetryPerRequest = 1
 
 	send := func(gw *httptest.Server) string {
 		t.Helper()
@@ -210,7 +210,7 @@ func TestModelRouteExhaustsProvidersBeforeFallbackModel(t *testing.T) {
 		t.Fatalf("first attempt order = %s", got)
 	}
 
-	if err := st.ResetProviderModelState(ctx, "high", "high-primary"); err != nil {
+	if err := st.ResetProviderModelState(ctx, "high", "high-key", "high-primary"); err != nil {
 		t.Fatal(err)
 	}
 	lowPrimaryUnavailable.Store(true)
@@ -224,8 +224,8 @@ func TestModelRouteExhaustsProvidersBeforeFallbackModel(t *testing.T) {
 	}
 	gw.Close()
 
-	for _, providerModel := range [][2]string{{"high", "high-primary"}, {"low", "low-primary"}} {
-		if err := st.ResetProviderModelState(ctx, providerModel[0], providerModel[1]); err != nil {
+	for _, providerModel := range [][3]string{{"high", "high-key", "high-primary"}, {"low", "low-key", "low-primary"}} {
+		if err := st.ResetProviderModelState(ctx, providerModel[0], providerModel[1], providerModel[2]); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -238,6 +238,101 @@ func TestModelRouteExhaustsProvidersBeforeFallbackModel(t *testing.T) {
 	}
 	if got := strings.Join(readCalls(), ","); got != "high:high-primary,low:low-primary,low:low-fallback" {
 		t.Fatalf("key failure attempt order = %s", got)
+	}
+}
+
+func TestCandidatesAfterFailureScopesModelErrors(t *testing.T) {
+	failed := model.Key{ID: "provider-key-a", ProviderID: "provider", UpstreamModel: "shared"}
+	candidates := []model.Key{
+		{ID: "provider-key-b", ProviderID: "provider", UpstreamModel: "shared"},
+		{ID: "provider-key-b", ProviderID: "provider", UpstreamModel: "fallback"},
+		{ID: "other-key", ProviderID: "other", UpstreamModel: "shared"},
+	}
+
+	providerScoped := candidatesAfterFailure(append([]model.Key(nil), candidates...), failed, attemptResult{
+		errorType: "model_unavailable", providerModelUnavailable: true,
+	})
+	if len(providerScoped) != 2 || providerScoped[0].UpstreamModel != "fallback" || providerScoped[1].ProviderID != "other" {
+		t.Fatalf("provider-scoped candidates = %#v", providerScoped)
+	}
+
+	keyScoped := candidatesAfterFailure(append([]model.Key(nil), candidates...), failed, attemptResult{errorType: "model_unavailable"})
+	if len(keyScoped) != len(candidates) {
+		t.Fatalf("key-scoped candidates = %#v", keyScoped)
+	}
+}
+
+func TestModelRouteBusyFallbackRequiresExplicitOptIn(t *testing.T) {
+	var highCalls, lowCalls atomic.Int32
+	high := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		highCalls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"high"},"finish_reason":"stop"}]}`))
+	}))
+	defer high.Close()
+	low := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		lowCalls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"low"},"finish_reason":"stop"}]}`))
+	}))
+	defer low.Close()
+
+	ctx := context.Background()
+	st := testStore(t)
+	_, _ = st.UpsertProvider(ctx, model.Provider{ID: "high", Name: "high", Type: model.ProviderOpenAICompatible, BaseURL: high.URL, Priority: 100, Enabled: true})
+	_, _ = st.UpsertProvider(ctx, model.Provider{ID: "low", Name: "low", Type: model.ProviderOpenAICompatible, BaseURL: low.URL, Priority: 1, Enabled: true})
+	_, _ = st.UpsertKey(ctx, model.Key{ID: "high-key", ProviderID: "high", Name: "high", Secret: "high", Enabled: true})
+	_, _ = st.UpsertKey(ctx, model.Key{ID: "low-key", ProviderID: "low", Name: "low", Secret: "low", Enabled: true})
+	_, err := st.UpsertModelRoute(ctx, model.ModelRoute{
+		ID: "busy-auto", Name: "Busy", Enabled: true,
+		Models: []model.ModelRouteModel{
+			{Name: "primary", Priority: 100, Enabled: true, Targets: []model.ModelRouteTarget{{ProviderID: "high", UpstreamModel: "primary", Enabled: true}}},
+			{Name: "fallback", Priority: 10, Enabled: true, Targets: []model.ModelRouteTarget{{ProviderID: "low", UpstreamModel: "fallback", Enabled: true}}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	gatewayKey, err := st.CreateGatewayKey(ctx, "busy")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	run := func(fallbackOnBusy bool) (int, string) {
+		t.Helper()
+		cfg := config.Default()
+		cfg.Routing.MaxConcurrentPerKey = 1
+		cfg.Routing.QueueTimeoutMilliseconds = 10
+		cfg.Routing.FallbackOnBusy = fallbackOnBusy
+		rt := router.New(st, cfg.Routing)
+		px := New(st, rt, cfg)
+		release, ok := px.limits.tryAcquire("high", "high-key")
+		if !ok {
+			t.Fatal("failed to occupy high-priority key")
+		}
+		defer release()
+		mux := http.NewServeMux()
+		px.Register(mux)
+		gw := httptest.NewServer(mux)
+		defer gw.Close()
+		req, _ := http.NewRequest(http.MethodPost, gw.URL+"/v1/chat/completions", strings.NewReader(`{"model":"busy-auto","messages":[{"role":"user","content":"test"}]}`))
+		req.Header.Set("Authorization", "Bearer "+gatewayKey.Plaintext)
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		body, _ := io.ReadAll(res.Body)
+		return res.StatusCode, string(body)
+	}
+
+	status, body := run(false)
+	if status != http.StatusServiceUnavailable || !strings.Contains(body, "gateway_busy") || highCalls.Load() != 0 || lowCalls.Load() != 0 {
+		t.Fatalf("strict result status=%d body=%s high=%d low=%d", status, body, highCalls.Load(), lowCalls.Load())
+	}
+	status, body = run(true)
+	if status != http.StatusOK || !strings.Contains(body, "low") || highCalls.Load() != 0 || lowCalls.Load() != 1 {
+		t.Fatalf("spillover result status=%d body=%s high=%d low=%d", status, body, highCalls.Load(), lowCalls.Load())
 	}
 }
 
@@ -557,6 +652,20 @@ func TestOpenAIResponsesFallsBackToChatCompletions(t *testing.T) {
 	if strings.Join(paths, ",") != "/v1/responses,/v1/chat/completions" {
 		t.Fatalf("paths = %#v", paths)
 	}
+	logs, err := st.ListLogs(ctx, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(logs) != 1 || len(logs[0].AttemptTrace) != 2 {
+		t.Fatalf("request logs = %#v", logs)
+	}
+	trace := logs[0].AttemptTrace
+	if trace[0].UpstreamProtocol != router.ProtocolOpenAIResponses || trace[0].Status != http.StatusNotFound || trace[0].ErrorType == "" {
+		t.Fatalf("native Responses attempt = %#v", trace[0])
+	}
+	if trace[1].UpstreamProtocol != router.ProtocolOpenAI || trace[1].Status != http.StatusOK || trace[1].ErrorType != "" {
+		t.Fatalf("Chat fallback attempt = %#v", trace[1])
+	}
 }
 
 func TestStatefulResponsesDoesNotFallBackToChatCompletions(t *testing.T) {
@@ -821,6 +930,7 @@ func TestEmptyStreamFailsOverBeforeFirstByte(t *testing.T) {
 		calls++
 		w.Header().Set("Content-Type", "text/event-stream")
 		if r.Header.Get("Authorization") == "Bearer empty" {
+			w.Header().Set("OpenAI-Request-ID", "failed-attempt")
 			return
 		}
 		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\ndata: [DONE]\n\n"))
@@ -855,6 +965,55 @@ func TestEmptyStreamFailsOverBeforeFirstByte(t *testing.T) {
 	}
 	if calls != 2 {
 		t.Fatalf("calls = %d, want 2", calls)
+	}
+	if got := res.Header.Get("OpenAI-Request-ID"); got != "" {
+		t.Fatalf("failed attempt metadata leaked into final response: %q", got)
+	}
+}
+
+func TestEmptyStreamAfterImmediateCommitRecordsFailure(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+	}))
+	defer upstream.Close()
+
+	ctx := context.Background()
+	st := testStore(t)
+	_, _ = st.UpsertProvider(ctx, model.Provider{ID: "p", Name: "p", Type: model.ProviderOpenAICompatible, BaseURL: upstream.URL, Enabled: true})
+	_, _ = st.UpsertKey(ctx, model.Key{ID: "empty", ProviderID: "p", Name: "empty", Secret: "empty", Enabled: true})
+	gatewayKey, err := st.CreateGatewayKey(ctx, "stream")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Default()
+	cfg.Routing.StreamRetryBeforeFirstByte = false
+	gw := testGateway(t, st, cfg)
+	defer gw.Close()
+
+	req, _ := http.NewRequest(http.MethodPost, gw.URL+"/v1/chat/completions", strings.NewReader(`{"model":"gpt","stream":true,"messages":[{"role":"user","content":"hi"}]}`))
+	req.Header.Set("Authorization", "Bearer "+gatewayKey.Plaintext)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	_, _ = io.ReadAll(res.Body)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("committed stream status = %d", res.StatusCode)
+	}
+	logs, err := st.ListLogs(ctx, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(logs) != 1 || logs[0].ErrorType != "empty_response" || len(logs[0].AttemptTrace) != 1 || logs[0].AttemptTrace[0].ErrorType != "empty_response" {
+		t.Fatalf("empty stream log = %#v", logs)
+	}
+	keys, err := st.ListKeys(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(keys) != 1 || keys[0].ConsecutiveFailures != 1 || keys[0].LastError != "empty upstream stream" {
+		t.Fatalf("empty stream key health = %#v", keys)
 	}
 }
 
@@ -1079,6 +1238,8 @@ func TestModelsReflectConfiguredMappingsAndProtocol(t *testing.T) {
 	_, _ = st.UpsertProvider(ctx, model.Provider{ID: "enabled", Name: "enabled", Type: model.ProviderOpenAICompatible, BaseURL: "https://example.test", Enabled: true, ModelMap: map[string]string{"public-b": "upstream-b", "public-a": "upstream-a", "*": "fallback"}})
 	_, _ = st.UpsertProvider(ctx, model.Provider{ID: "discovered", Name: "discovered", Type: model.ProviderOpenAICompatible, BaseURL: "https://example.test", Enabled: true})
 	_, _ = st.UpsertProvider(ctx, model.Provider{ID: "disabled", Name: "disabled", Type: model.ProviderOpenAICompatible, BaseURL: "https://example.test", Enabled: false, ModelMap: map[string]string{"hidden": "hidden"}})
+	_, _ = st.UpsertKey(ctx, model.Key{ID: "enabled-key", ProviderID: "enabled", Name: "enabled", Secret: "enabled", Enabled: true})
+	_, _ = st.UpsertKey(ctx, model.Key{ID: "discovered-key", ProviderID: "discovered", Name: "discovered", Secret: "discovered", Enabled: true})
 	if err := st.ReplaceProviderModels(ctx, "discovered", []string{"identity-model"}); err != nil {
 		t.Fatal(err)
 	}
@@ -1115,6 +1276,93 @@ func TestModelsReflectConfiguredMappingsAndProtocol(t *testing.T) {
 	geminiData := gemini["models"].([]any)
 	if len(geminiData) != 3 || geminiData[0].(map[string]any)["name"] != "models/identity-model" {
 		t.Fatalf("Gemini models = %#v", geminiData)
+	}
+}
+
+func TestModelsHideLogicalRouteWithoutUsableKey(t *testing.T) {
+	ctx := context.Background()
+	st := testStore(t)
+	_, _ = st.UpsertProvider(ctx, model.Provider{ID: "provider", Name: "provider", Type: model.ProviderOpenAICompatible, BaseURL: "https://example.test", Enabled: true})
+	_, err := st.UpsertModelRoute(ctx, model.ModelRoute{
+		ID: "logical", Name: "logical", Enabled: true,
+		Models: []model.ModelRouteModel{{Name: "primary", Priority: 100, Enabled: true, Targets: []model.ModelRouteTarget{{ProviderID: "provider", UpstreamModel: "upstream", Enabled: true}}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	gatewayKey, _ := st.CreateGatewayKey(ctx, "models")
+	gw := testGateway(t, st, config.Default())
+	defer gw.Close()
+
+	list := func() []any {
+		t.Helper()
+		req, _ := http.NewRequest(http.MethodGet, gw.URL+"/v1/models", nil)
+		req.Header.Set("Authorization", "Bearer "+gatewayKey.Plaintext)
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		var payload map[string]any
+		if err := json.NewDecoder(res.Body).Decode(&payload); err != nil {
+			t.Fatal(err)
+		}
+		return payload["data"].([]any)
+	}
+
+	if got := list(); len(got) != 0 {
+		t.Fatalf("models without key = %#v", got)
+	}
+	_, _ = st.UpsertKey(ctx, model.Key{ID: "key", ProviderID: "provider", Name: "key", Secret: "secret", Enabled: false})
+	if got := list(); len(got) != 0 {
+		t.Fatalf("models with disabled key = %#v", got)
+	}
+	_, _ = st.UpsertKey(ctx, model.Key{ID: "key", ProviderID: "provider", Name: "key", Secret: "secret", Enabled: true})
+	got := list()
+	if len(got) != 1 || got[0].(map[string]any)["id"] != "logical" {
+		t.Fatalf("models with enabled key = %#v", got)
+	}
+}
+
+func TestModelsRespectProviderModelAllowlist(t *testing.T) {
+	ctx := context.Background()
+	st := testStore(t)
+	_, _ = st.UpsertProvider(ctx, model.Provider{
+		ID: "provider", Name: "provider", Type: model.ProviderOpenAICompatible, BaseURL: "https://example.test", Enabled: true,
+		ModelAllowlistEnabled: true, ModelAllowlist: []string{"allowed"},
+	})
+	_, _ = st.UpsertKey(ctx, model.Key{ID: "key", ProviderID: "provider", Name: "key", Secret: "secret", Enabled: true})
+	if err := st.ReplaceProviderModels(ctx, "provider", []string{"allowed", "blocked"}); err != nil {
+		t.Fatal(err)
+	}
+	_, err := st.UpsertModelRoute(ctx, model.ModelRoute{
+		ID: "blocked-logical", Name: "blocked", Enabled: true,
+		Models: []model.ModelRouteModel{{Name: "blocked", Priority: 100, Enabled: true, Targets: []model.ModelRouteTarget{{ProviderID: "provider", UpstreamModel: "blocked", Enabled: true}}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	gatewayKey, _ := st.CreateGatewayKey(ctx, "models")
+	gw := testGateway(t, st, config.Default())
+	defer gw.Close()
+
+	req, _ := http.NewRequest(http.MethodGet, gw.URL+"/v1/models", nil)
+	req.Header.Set("Authorization", "Bearer "+gatewayKey.Plaintext)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	var payload struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.Data) != 1 || payload.Data[0].ID != "allowed" {
+		t.Fatalf("models = %#v", payload.Data)
 	}
 }
 

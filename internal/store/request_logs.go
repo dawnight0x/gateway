@@ -3,6 +3,8 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
+	"fmt"
 	"strings"
 
 	"local-ai-gateway/internal/model"
@@ -46,7 +48,7 @@ func (s *Store) QueryLogs(ctx context.Context, query LogQuery) (LogPage, error) 
 		return LogPage{}, err
 	}
 	pageArgs := append(append([]any(nil), args...), query.Limit, query.Offset)
-	rows, err := s.db.QueryContext(ctx, `SELECT id,request_id,inbound_protocol,provider_id,key_id,model,route_id,upstream_model,attempts,status,latency_ms,prompt_tokens,completion_tokens,total_tokens,error_type,created_at FROM request_logs`+where+` ORDER BY id DESC LIMIT ? OFFSET ?`, pageArgs...)
+	rows, err := s.db.QueryContext(ctx, `SELECT id,request_id,inbound_protocol,provider_id,key_id,model,route_id,upstream_model,attempts,attempt_trace,trace_truncated,status,latency_ms,prompt_tokens,completion_tokens,total_tokens,error_type,created_at FROM request_logs`+where+` ORDER BY id DESC LIMIT ? OFFSET ?`, pageArgs...)
 	if err != nil {
 		return LogPage{}, err
 	}
@@ -89,8 +91,8 @@ func logWhere(query LogQuery) (string, []any) {
 	}
 	if search := strings.TrimSpace(query.Search); search != "" {
 		like := "%" + search + "%"
-		conditions = append(conditions, `(request_id LIKE ? OR model LIKE ? OR route_id LIKE ? OR upstream_model LIKE ? OR provider_id LIKE ? OR key_id LIKE ? OR error_type LIKE ?)`)
-		args = append(args, like, like, like, like, like, like, like)
+		conditions = append(conditions, `(request_id LIKE ? OR model LIKE ? OR route_id LIKE ? OR upstream_model LIKE ? OR provider_id LIKE ? OR key_id LIKE ? OR error_type LIKE ? OR attempt_trace LIKE ?)`)
+		args = append(args, like, like, like, like, like, like, like, like)
 	}
 	if len(conditions) == 0 {
 		return "", args
@@ -104,10 +106,15 @@ func scanRequestLogRows(rows *sql.Rows) ([]model.RequestLog, error) {
 		var item model.RequestLog
 		var providerID, keyID, modelID, routeID, upstreamModel sql.NullString
 		var prompt, completion, total sql.NullInt64
-		var created string
-		if err := rows.Scan(&item.ID, &item.RequestID, &item.InboundProtocol, &providerID, &keyID, &modelID, &routeID, &upstreamModel, &item.Attempts, &item.Status, &item.LatencyMS, &prompt, &completion, &total, &item.ErrorType, &created); err != nil {
+		var created, attemptTrace string
+		var traceTruncated int
+		if err := rows.Scan(&item.ID, &item.RequestID, &item.InboundProtocol, &providerID, &keyID, &modelID, &routeID, &upstreamModel, &item.Attempts, &attemptTrace, &traceTruncated, &item.Status, &item.LatencyMS, &prompt, &completion, &total, &item.ErrorType, &created); err != nil {
 			return nil, err
 		}
+		if err := json.Unmarshal([]byte(attemptTrace), &item.AttemptTrace); err != nil {
+			return nil, fmt.Errorf("decode request attempt trace: %w", err)
+		}
+		item.TraceTruncated = traceTruncated != 0
 		item.ProviderID = providerID.String
 		item.KeyID = keyID.String
 		item.Model = modelID.String

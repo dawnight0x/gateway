@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"testing"
@@ -87,17 +88,40 @@ func TestUpgradeCreatesPreMigrationBackupAndIntegrityCheck(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "gateway.db")
 	secretPath := filepath.Join(dir, "secret.key")
-	st, err := Open(dbPath, secretPath)
+	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.db.Exec(`DROP TABLE provider_models`); err != nil {
+	if _, err := db.Exec(`CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, checksum TEXT NOT NULL DEFAULT '', applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.db.Exec(`DELETE FROM schema_migrations WHERE version=?`, len(schemaMigrations)); err != nil {
+	// Build the v6 schema so this test continues to exercise both the per-Key model-state
+	// migration and every migration appended after it.
+	const legacySchemaVersion = 6
+	for index, migration := range schemaMigrations[:legacySchemaVersion] {
+		if _, err := db.Exec(migration); err != nil {
+			t.Fatalf("apply old migration %d: %v", index+1, err)
+		}
+		if _, err := db.Exec(`INSERT INTO schema_migrations (version,checksum) VALUES (?,?)`, index+1, migrationChecksum(migration)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := db.Exec(`INSERT INTO providers (id,name,type,base_url,enabled) VALUES ('provider','provider','openai-compatible','https://provider.test',1)`); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.Close(); err != nil {
+	if _, err := db.Exec(`INSERT INTO keys (id,provider_id,name,secret_cipher,enabled) VALUES ('key','provider','key','legacy-ciphertext',1)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO provider_models (provider_id,model_id) VALUES ('provider','legacy-model')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO provider_model_state (provider_id,model_id,consecutive_failures,last_error,failure_count,last_used_at) VALUES ('provider','legacy-model',1,'legacy error',1,CURRENT_TIMESTAMP)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO request_logs (request_id,inbound_protocol,provider_id,key_id,model,route_id,upstream_model,attempts,status,latency_ms) VALUES ('legacy-request','openai','provider','key','logical','logical','legacy-model',1,200,10)`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
 		t.Fatal(err)
 	}
 
@@ -115,6 +139,34 @@ func TestUpgradeCreatesPreMigrationBackupAndIntegrityCheck(t *testing.T) {
 	}
 	if err := upgraded.IntegrityCheck(context.Background()); err != nil {
 		t.Fatal(err)
+	}
+	provider, err := upgraded.GetProvider(context.Background(), "provider")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if provider.ModelAllowlistEnabled || len(provider.ModelAllowlist) != 0 {
+		t.Fatalf("migrated provider allowlist = %#v", provider)
+	}
+	inventory, err := upgraded.ListProviderModels(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := inventory["provider"]; len(got) != 1 || got[0] != "legacy-model" {
+		t.Fatalf("migrated inventory = %#v", got)
+	}
+	states, err := upgraded.ListProviderModelStates(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(states) != 1 || states[0].KeyID != "key" || states[0].ModelID != "legacy-model" {
+		t.Fatalf("migrated model states = %#v", states)
+	}
+	logs, err := upgraded.ListLogs(context.Background(), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(logs) != 1 || logs[0].RequestID != "legacy-request" || len(logs[0].AttemptTrace) != 0 {
+		t.Fatalf("migrated request logs = %#v", logs)
 	}
 }
 
@@ -664,6 +716,99 @@ func TestProviderModelInventoryPersistsAndDiscoveryFailureRetainsLastSuccess(t *
 	}
 }
 
+func TestProviderModelAllowlistRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	st := openTestStore(t, Options{Timezone: "Asia/Singapore"})
+	provider, err := st.UpsertProvider(ctx, model.Provider{
+		ID: "gemini", Name: "gemini", Type: model.ProviderGeminiCompatible, BaseURL: "https://example.test", Enabled: true,
+		ModelAllowlistEnabled: true, ModelAllowlist: []string{" models/gemini-pro ", "gemini-pro", "gemini-flash"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !provider.ModelAllowlistEnabled || len(provider.ModelAllowlist) != 2 || provider.ModelAllowlist[0] != "gemini-pro" || provider.ModelAllowlist[1] != "gemini-flash" {
+		t.Fatalf("provider allowlist = %#v", provider)
+	}
+	_, err = st.UpsertKey(ctx, model.Key{ID: "key", ProviderID: "gemini", Name: "key", Secret: "secret", Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	keys, err := st.ListKeys(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(keys) != 1 || !keys[0].ProviderModelAllowlistEnabled || len(keys[0].ProviderModelAllowlist) != 2 {
+		t.Fatalf("key provider allowlist = %#v", keys)
+	}
+}
+
+func TestProviderModelInventoryNormalizesGeminiNames(t *testing.T) {
+	st := openTestStore(t, Options{Timezone: "Asia/Singapore"})
+	ctx := context.Background()
+	if _, err := st.UpsertProvider(ctx, model.Provider{ID: "gemini", Name: "gemini", Type: model.ProviderGeminiCompatible, BaseURL: "https://generativelanguage.googleapis.com", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.ReplaceProviderModels(ctx, "gemini", []string{"models/gemini-b", "gemini-a", "models/gemini-a"}); err != nil {
+		t.Fatal(err)
+	}
+	inventory, err := st.ListProviderModels(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := inventory["gemini"]; len(got) != 2 || got[0] != "gemini-a" || got[1] != "gemini-b" {
+		t.Fatalf("Gemini inventory = %#v", got)
+	}
+}
+
+func TestProviderModelInventoryIsolatedPerKeyAndExposedAsUnion(t *testing.T) {
+	st := openTestStore(t, Options{Timezone: "Asia/Singapore"})
+	ctx := context.Background()
+	if _, err := st.UpsertProvider(ctx, model.Provider{ID: "provider", Name: "provider", Type: model.ProviderOpenAICompatible, BaseURL: "https://example.test", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []model.Key{
+		{ID: "key-a", ProviderID: "provider", Name: "a", Secret: "a", Enabled: true},
+		{ID: "key-b", ProviderID: "provider", Name: "b", Secret: "b", Enabled: true},
+	} {
+		if _, err := st.UpsertKey(ctx, key); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := st.ReplaceProviderKeyModels(ctx, "provider", "key-a", []string{"shared", "model-a"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.ReplaceProviderKeyModels(ctx, "provider", "key-b", []string{"shared", "model-b"}); err != nil {
+		t.Fatal(err)
+	}
+	inventory, err := st.ListProviderModels(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := inventory["provider"]; len(got) != 3 || got[0] != "model-a" || got[1] != "model-b" || got[2] != "shared" {
+		t.Fatalf("union inventory = %#v", got)
+	}
+	if err := st.ReplaceProviderKeyModels(ctx, "provider", "key-a", []string{"model-a-2"}); err != nil {
+		t.Fatal(err)
+	}
+	inventory, err = st.ListProviderModels(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := inventory["provider"]; len(got) != 3 || got[0] != "model-a-2" || got[1] != "model-b" || got[2] != "shared" {
+		t.Fatalf("inventory after key refresh = %#v", got)
+	}
+	if err := st.DeleteKey(ctx, "key-b"); err != nil {
+		t.Fatal(err)
+	}
+	inventory, err = st.ListProviderModels(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := inventory["provider"]; len(got) != 1 || got[0] != "model-a-2" {
+		t.Fatalf("inventory after key delete = %#v", got)
+	}
+}
+
 func TestModelRouteRoundTripPreservesModelAndProviderPriorityOrder(t *testing.T) {
 	st := openTestStore(t, Options{Timezone: "Asia/Singapore"})
 	ctx := context.Background()
@@ -699,5 +844,90 @@ func TestModelRouteRoundTripPreservesModelAndProviderPriorityOrder(t *testing.T)
 	}
 	if _, err := st.GetModelRoute(ctx, route.ID); err != sql.ErrNoRows {
 		t.Fatalf("deleted route error = %v", err)
+	}
+}
+
+func TestDeleteProviderDisablesRouteAfterLastTargetIsRemoved(t *testing.T) {
+	st := openTestStore(t, Options{Timezone: "Asia/Singapore"})
+	ctx := context.Background()
+	for _, providerID := range []string{"high", "low"} {
+		if _, err := st.UpsertProvider(ctx, model.Provider{ID: providerID, Name: providerID, Type: model.ProviderOpenAICompatible, BaseURL: "https://" + providerID + ".test", Enabled: true}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, err := st.UpsertModelRoute(ctx, model.ModelRoute{
+		ID: "logical", Name: "logical", Enabled: true,
+		Models: []model.ModelRouteModel{{Name: "primary", Priority: 100, Enabled: true, Targets: []model.ModelRouteTarget{
+			{ProviderID: "high", UpstreamModel: "model", Enabled: true},
+			{ProviderID: "low", UpstreamModel: "model", Enabled: true},
+		}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.DeleteProvider(ctx, "high"); err != nil {
+		t.Fatal(err)
+	}
+	route, err := st.GetModelRoute(ctx, "logical")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !route.Enabled || len(route.Models) != 1 || !route.Models[0].Enabled || len(route.Models[0].Targets) != 1 || route.Models[0].Targets[0].ProviderID != "low" {
+		t.Fatalf("route after first provider delete = %#v", route)
+	}
+	if err := st.DeleteProvider(ctx, "low"); err != nil {
+		t.Fatal(err)
+	}
+	route, err = st.GetModelRoute(ctx, "logical")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if route.Enabled || len(route.Models) != 1 || route.Models[0].Enabled || len(route.Models[0].Targets) != 0 {
+		t.Fatalf("route after last provider delete = %#v", route)
+	}
+}
+
+func TestProviderModelStateIsBoundedPerProvider(t *testing.T) {
+	st := openTestStore(t, Options{Timezone: "Asia/Singapore"})
+	ctx := context.Background()
+	if _, err := st.UpsertProvider(ctx, model.Provider{ID: "provider", Name: "provider", Type: model.ProviderOpenAICompatible, BaseURL: "https://provider.test", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.UpsertKey(ctx, model.Key{ID: "key", ProviderID: "provider", Name: "key", Secret: "secret", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	tx, err := st.db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for index := 0; index < maxProviderModelStatesPerProvider+10; index++ {
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO provider_model_state (provider_id,key_id,model_id,consecutive_failures,failure_count,last_used_at)
+			VALUES (?,?,?,1,1,CURRENT_TIMESTAMP)
+		`, "provider", "key", fmt.Sprintf("model-%04d", index)); err != nil {
+			_ = tx.Rollback()
+			t.Fatal(err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	status := http.StatusNotFound
+	if err := st.RecordProviderModelFailure(ctx, "provider", "key", "latest", &status, "model not found", FailurePolicy{Threshold: 1, Cooldown: time.Minute, ForceCooldown: true}); err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	if err := st.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM provider_model_state WHERE provider_id='provider'`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != maxProviderModelStatesPerProvider {
+		t.Fatalf("model state count = %d, want %d", count, maxProviderModelStatesPerProvider)
+	}
+	var found int
+	if err := st.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM provider_model_state WHERE provider_id='provider' AND model_id='latest'`).Scan(&found); err != nil {
+		t.Fatal(err)
+	}
+	if found != 1 {
+		t.Fatal("latest model state was pruned")
 	}
 }

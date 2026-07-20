@@ -316,11 +316,24 @@ func joinURL(base, path string) (string, error) {
 	if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
 		return path, nil
 	}
-	u, err := url.Parse(strings.TrimRight(base, "/") + "/" + strings.TrimLeft(path, "/"))
+	baseURL, err := url.Parse(strings.TrimRight(strings.TrimSpace(base), "/"))
 	if err != nil {
 		return "", err
 	}
-	return u.String(), nil
+	joinedPath := "/" + strings.TrimLeft(path, "/")
+	basePath := strings.TrimRight(baseURL.Path, "/")
+	for _, version := range []string{"/v1beta", "/v1"} {
+		if (basePath == version || strings.HasSuffix(basePath, version)) && (joinedPath == version || strings.HasPrefix(joinedPath, version+"/")) {
+			joinedPath = strings.TrimPrefix(joinedPath, version)
+			break
+		}
+	}
+	baseURL.Path = basePath + joinedPath
+	baseURL.RawPath = ""
+	if baseURL.Path == "" {
+		baseURL.Path = "/"
+	}
+	return baseURL.String(), nil
 }
 
 func joinBalanceURL(base, path string) (string, error) {

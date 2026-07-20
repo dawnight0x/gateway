@@ -336,6 +336,80 @@ var schemaMigrations = []string{
 	CREATE INDEX IF NOT EXISTS idx_request_logs_created_at ON request_logs(created_at);
 	CREATE INDEX IF NOT EXISTS idx_request_logs_provider_created_at ON request_logs(provider_id,created_at);
 	CREATE INDEX IF NOT EXISTS idx_request_logs_key_created_at ON request_logs(key_id,created_at);`,
+	`DROP TABLE IF EXISTS request_logs_v7;
+	CREATE TABLE request_logs_v7 (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		request_id TEXT NOT NULL,
+		inbound_protocol TEXT NOT NULL,
+		provider_id TEXT,
+		key_id TEXT,
+		model TEXT,
+		route_id TEXT NOT NULL DEFAULT '',
+		upstream_model TEXT NOT NULL DEFAULT '',
+		attempts INTEGER NOT NULL DEFAULT 0,
+		attempt_trace TEXT NOT NULL DEFAULT '[]',
+		trace_truncated INTEGER NOT NULL DEFAULT 0,
+		status INTEGER NOT NULL,
+		latency_ms INTEGER NOT NULL,
+		prompt_tokens INTEGER,
+		completion_tokens INTEGER,
+		total_tokens INTEGER,
+		error_type TEXT NOT NULL DEFAULT '',
+		created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+	);
+	INSERT INTO request_logs_v7 (
+		id,request_id,inbound_protocol,provider_id,key_id,model,route_id,upstream_model,attempts,
+		status,latency_ms,prompt_tokens,completion_tokens,total_tokens,error_type,created_at
+	)
+	SELECT id,request_id,inbound_protocol,provider_id,key_id,model,route_id,upstream_model,attempts,
+		status,latency_ms,prompt_tokens,completion_tokens,total_tokens,error_type,created_at
+	FROM request_logs;
+	DROP TABLE request_logs;
+	ALTER TABLE request_logs_v7 RENAME TO request_logs;
+	CREATE INDEX IF NOT EXISTS idx_request_logs_created_at ON request_logs(created_at);
+	CREATE INDEX IF NOT EXISTS idx_request_logs_provider_created_at ON request_logs(provider_id,created_at);
+	CREATE INDEX IF NOT EXISTS idx_request_logs_key_created_at ON request_logs(key_id,created_at);
+
+	CREATE TABLE provider_models_v7 (
+		provider_id TEXT NOT NULL REFERENCES providers(id) ON DELETE CASCADE,
+		key_id TEXT NOT NULL DEFAULT '',
+		model_id TEXT NOT NULL,
+		discovered_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		PRIMARY KEY(provider_id,key_id,model_id)
+	);
+	INSERT INTO provider_models_v7 (provider_id,key_id,model_id,discovered_at)
+	SELECT provider_id,'',model_id,discovered_at FROM provider_models;
+	DROP TABLE provider_models;
+	ALTER TABLE provider_models_v7 RENAME TO provider_models;
+	CREATE INDEX IF NOT EXISTS idx_provider_models_discovered_at ON provider_models(discovered_at);
+	CREATE INDEX IF NOT EXISTS idx_provider_models_key ON provider_models(key_id);
+
+	CREATE TABLE provider_model_state_v7 (
+		provider_id TEXT NOT NULL REFERENCES providers(id) ON DELETE CASCADE,
+		key_id TEXT NOT NULL REFERENCES keys(id) ON DELETE CASCADE,
+		model_id TEXT NOT NULL,
+		consecutive_failures INTEGER NOT NULL DEFAULT 0,
+		cooldown_until TEXT,
+		last_error TEXT NOT NULL DEFAULT '',
+		last_status_code INTEGER,
+		success_count INTEGER NOT NULL DEFAULT 0,
+		failure_count INTEGER NOT NULL DEFAULT 0,
+		last_used_at TEXT,
+		PRIMARY KEY(provider_id,key_id,model_id)
+	);
+	INSERT INTO provider_model_state_v7 (
+		provider_id,key_id,model_id,consecutive_failures,cooldown_until,last_error,
+		last_status_code,success_count,failure_count,last_used_at
+	)
+	SELECT s.provider_id,k.id,s.model_id,s.consecutive_failures,s.cooldown_until,s.last_error,
+		s.last_status_code,s.success_count,s.failure_count,s.last_used_at
+	FROM provider_model_state s JOIN keys k ON k.provider_id=s.provider_id;
+	DROP TABLE provider_model_state;
+	ALTER TABLE provider_model_state_v7 RENAME TO provider_model_state;
+	CREATE INDEX IF NOT EXISTS idx_provider_model_state_cooldown ON provider_model_state(cooldown_until);
+	CREATE INDEX IF NOT EXISTS idx_provider_model_state_key ON provider_model_state(key_id);`,
+	`ALTER TABLE providers ADD COLUMN model_allowlist_enabled INTEGER NOT NULL DEFAULT 0;
+	ALTER TABLE providers ADD COLUMN model_allowlist TEXT NOT NULL DEFAULT '[]';`,
 }
 
 func Open(path, secretPath string) (*Store, error) {
@@ -586,7 +660,7 @@ func migrationChecksum(migration string) string {
 }
 
 func (s *Store) ListProviders(ctx context.Context) ([]model.Provider, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id,name,type,base_url,priority,enabled,model_map,balance_path,created_at,updated_at FROM providers ORDER BY priority DESC, created_at ASC`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id,name,type,base_url,priority,enabled,model_map,model_allowlist_enabled,model_allowlist,balance_path,created_at,updated_at FROM providers ORDER BY priority DESC, created_at ASC`)
 	if err != nil {
 		return nil, err
 	}
@@ -603,7 +677,7 @@ func (s *Store) ListProviders(ctx context.Context) ([]model.Provider, error) {
 }
 
 func (s *Store) GetProvider(ctx context.Context, id string) (*model.Provider, error) {
-	row := s.db.QueryRowContext(ctx, `SELECT id,name,type,base_url,priority,enabled,model_map,balance_path,created_at,updated_at FROM providers WHERE id=?`, id)
+	row := s.db.QueryRowContext(ctx, `SELECT id,name,type,base_url,priority,enabled,model_map,model_allowlist_enabled,model_allowlist,balance_path,created_at,updated_at FROM providers WHERE id=?`, id)
 	p, err := scanProvider(row)
 	if err == sql.ErrNoRows {
 		return nil, sql.ErrNoRows
@@ -982,14 +1056,30 @@ func (s *Store) UpsertProvider(ctx context.Context, p model.Provider) (model.Pro
 		p.Type = model.ProviderOpenAICompatible
 	}
 	p.BaseURL = strings.TrimRight(p.BaseURL, "/")
-	b, _ := json.Marshal(p.ModelMap)
+	modelMapJSON, _ := json.Marshal(p.ModelMap)
+	allowlist := make([]string, 0, len(p.ModelAllowlist))
+	seenModels := make(map[string]struct{}, len(p.ModelAllowlist))
+	for _, modelID := range p.ModelAllowlist {
+		modelID = model.NormalizeModelID(p.Type, modelID)
+		if modelID == "" {
+			continue
+		}
+		if _, exists := seenModels[modelID]; exists {
+			continue
+		}
+		seenModels[modelID] = struct{}{}
+		allowlist = append(allowlist, modelID)
+	}
+	p.ModelAllowlist = allowlist
+	allowlistJSON, _ := json.Marshal(allowlist)
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO providers (id,name,type,base_url,priority,enabled,model_map,balance_path,updated_at)
-		VALUES (?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)
+		INSERT INTO providers (id,name,type,base_url,priority,enabled,model_map,model_allowlist_enabled,model_allowlist,balance_path,updated_at)
+		VALUES (?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)
 		ON CONFLICT(id) DO UPDATE SET
 			name=excluded.name,type=excluded.type,base_url=excluded.base_url,priority=excluded.priority,
-			enabled=excluded.enabled,model_map=excluded.model_map,balance_path=excluded.balance_path,updated_at=CURRENT_TIMESTAMP
-	`, p.ID, p.Name, p.Type, p.BaseURL, p.Priority, boolInt(p.Enabled), string(b), p.BalancePath)
+			enabled=excluded.enabled,model_map=excluded.model_map,model_allowlist_enabled=excluded.model_allowlist_enabled,
+			model_allowlist=excluded.model_allowlist,balance_path=excluded.balance_path,updated_at=CURRENT_TIMESTAMP
+	`, p.ID, p.Name, p.Type, p.BaseURL, p.Priority, boolInt(p.Enabled), string(modelMapJSON), boolInt(p.ModelAllowlistEnabled), string(allowlistJSON), p.BalancePath)
 	if err != nil {
 		return p, err
 	}
@@ -1004,13 +1094,64 @@ func (s *Store) DeleteProvider(ctx context.Context, id string) error {
 	if err := s.flushKeySuccesses(ctx); err != nil {
 		return err
 	}
-	res, err := s.db.ExecContext(ctx, `DELETE FROM providers WHERE id=?`, id)
-	return requireRowsAffected(res, err)
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	rows, err := tx.QueryContext(ctx, `SELECT DISTINCT route_id FROM model_route_targets WHERE provider_id=?`, id)
+	if err != nil {
+		return err
+	}
+	affectedRoutes := make([]string, 0)
+	for rows.Next() {
+		var routeID string
+		if err := rows.Scan(&routeID); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		affectedRoutes = append(affectedRoutes, routeID)
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	res, err := tx.ExecContext(ctx, `DELETE FROM providers WHERE id=?`, id)
+	if err := requireRowsAffected(res, err); err != nil {
+		return err
+	}
+	for _, routeID := range affectedRoutes {
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE model_route_models SET enabled=0
+			WHERE route_id=? AND enabled=1 AND NOT EXISTS (
+				SELECT 1 FROM model_route_targets t
+				WHERE t.route_id=model_route_models.route_id
+					AND t.route_model=model_route_models.name AND t.enabled=1
+			)
+		`, routeID); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE model_routes SET
+				enabled=CASE WHEN EXISTS (
+					SELECT 1 FROM model_route_models m
+					JOIN model_route_targets t ON t.route_id=m.route_id AND t.route_model=m.name
+					WHERE m.route_id=model_routes.id AND m.enabled=1 AND t.enabled=1
+				) THEN enabled ELSE 0 END,
+				updated_at=CURRENT_TIMESTAMP
+			WHERE id=?
+		`, routeID); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 func (s *Store) ListKeys(ctx context.Context) ([]model.Key, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT k.id,k.provider_id,p.name,p.type,p.base_url,p.priority,p.enabled,p.model_map,p.balance_path,
+		SELECT k.id,k.provider_id,p.name,p.type,p.base_url,p.priority,p.enabled,p.model_map,p.model_allowlist_enabled,p.model_allowlist,p.balance_path,
 			k.name,k.secret_cipher,k.priority,k.enabled,k.manual_preferred,
 			COALESCE(st.consecutive_failures,0),st.cooldown_until,COALESCE(st.last_error,''),st.last_status_code,
 			COALESCE(st.success_count,0),COALESCE(st.failure_count,0),st.last_used_at
@@ -1072,6 +1213,9 @@ func (s *Store) UpsertKey(ctx context.Context, k model.Key) (model.Key, error) {
 	if err != nil {
 		return k, err
 	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM provider_models WHERE key_id=? AND provider_id<>?`, k.ID, k.ProviderID); err != nil {
+		return k, err
+	}
 	if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO key_state (key_id) VALUES (?)`, k.ID); err != nil {
 		return k, err
 	}
@@ -1110,8 +1254,19 @@ func (s *Store) DeleteKey(ctx context.Context, id string) error {
 	if err := s.flushKeySuccesses(ctx); err != nil {
 		return err
 	}
-	res, err := s.db.ExecContext(ctx, `DELETE FROM keys WHERE id=?`, id)
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, `DELETE FROM provider_models WHERE key_id=?`, id); err != nil {
+		return err
+	}
+	res, err := tx.ExecContext(ctx, `DELETE FROM keys WHERE id=?`, id)
 	if err := requireRowsAffected(res, err); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
 		return err
 	}
 	s.secretCacheMu.Lock()
@@ -1271,12 +1426,18 @@ func (s *Store) flushRequestLogs(ctx context.Context) error {
 		return err
 	}
 	for _, l := range batch {
+		attemptTrace, err := json.Marshal(l.AttemptTrace)
+		if err != nil {
+			_ = tx.Rollback()
+			s.restoreRequestLogs(batch)
+			return fmt.Errorf("encode request attempt trace: %w", err)
+		}
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO request_logs (
 				request_id,inbound_protocol,provider_id,key_id,model,route_id,upstream_model,attempts,
-				status,latency_ms,prompt_tokens,completion_tokens,total_tokens,error_type,created_at
-			) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-		`, l.RequestID, l.InboundProtocol, emptyNil(l.ProviderID), emptyNil(l.KeyID), emptyNil(l.Model), l.RouteID, l.UpstreamModel, l.Attempts, l.Status, l.LatencyMS, l.PromptTokens, l.CompletionTokens, l.TotalTokens, l.ErrorType, l.CreatedAt.UTC().Format("2006-01-02 15:04:05")); err != nil {
+				attempt_trace,trace_truncated,status,latency_ms,prompt_tokens,completion_tokens,total_tokens,error_type,created_at
+			) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+		`, l.RequestID, l.InboundProtocol, emptyNil(l.ProviderID), emptyNil(l.KeyID), emptyNil(l.Model), l.RouteID, l.UpstreamModel, l.Attempts, string(attemptTrace), boolInt(l.TraceTruncated), l.Status, l.LatencyMS, l.PromptTokens, l.CompletionTokens, l.TotalTokens, l.ErrorType, l.CreatedAt.UTC().Format("2006-01-02 15:04:05")); err != nil {
 			_ = tx.Rollback()
 			s.restoreRequestLogs(batch)
 			return err
@@ -1412,7 +1573,7 @@ func (s *Store) ListLogs(ctx context.Context, limit int) ([]model.RequestLog, er
 	if err := s.flushRequestLogs(ctx); err != nil {
 		return nil, err
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT id,request_id,inbound_protocol,provider_id,key_id,model,route_id,upstream_model,attempts,status,latency_ms,prompt_tokens,completion_tokens,total_tokens,error_type,created_at FROM request_logs ORDER BY id DESC LIMIT ?`, limit)
+	rows, err := s.db.QueryContext(ctx, `SELECT id,request_id,inbound_protocol,provider_id,key_id,model,route_id,upstream_model,attempts,attempt_trace,trace_truncated,status,latency_ms,prompt_tokens,completion_tokens,total_tokens,error_type,created_at FROM request_logs ORDER BY id DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -1422,10 +1583,15 @@ func (s *Store) ListLogs(ctx context.Context, limit int) ([]model.RequestLog, er
 		var l model.RequestLog
 		var providerID, keyID, mod, routeID, upstreamModel sql.NullString
 		var pt, ct, tt sql.NullInt64
-		var created string
-		if err := rows.Scan(&l.ID, &l.RequestID, &l.InboundProtocol, &providerID, &keyID, &mod, &routeID, &upstreamModel, &l.Attempts, &l.Status, &l.LatencyMS, &pt, &ct, &tt, &l.ErrorType, &created); err != nil {
+		var created, attemptTrace string
+		var traceTruncated int
+		if err := rows.Scan(&l.ID, &l.RequestID, &l.InboundProtocol, &providerID, &keyID, &mod, &routeID, &upstreamModel, &l.Attempts, &attemptTrace, &traceTruncated, &l.Status, &l.LatencyMS, &pt, &ct, &tt, &l.ErrorType, &created); err != nil {
 			return nil, err
 		}
+		if err := json.Unmarshal([]byte(attemptTrace), &l.AttemptTrace); err != nil {
+			return nil, fmt.Errorf("decode request attempt trace: %w", err)
+		}
+		l.TraceTruncated = traceTruncated != 0
 		l.ProviderID = providerID.String
 		l.KeyID = keyID.String
 		l.Model = mod.String
@@ -1490,15 +1656,20 @@ type rowScanner interface {
 
 func scanProvider(row rowScanner) (model.Provider, error) {
 	var p model.Provider
-	var modelMap, created, updated string
-	var enabled int
-	if err := row.Scan(&p.ID, &p.Name, &p.Type, &p.BaseURL, &p.Priority, &enabled, &modelMap, &p.BalancePath, &created, &updated); err != nil {
+	var modelMap, modelAllowlist, created, updated string
+	var enabled, modelAllowlistEnabled int
+	if err := row.Scan(&p.ID, &p.Name, &p.Type, &p.BaseURL, &p.Priority, &enabled, &modelMap, &modelAllowlistEnabled, &modelAllowlist, &p.BalancePath, &created, &updated); err != nil {
 		return p, err
 	}
 	p.Enabled = enabled == 1
+	p.ModelAllowlistEnabled = modelAllowlistEnabled == 1
 	p.ModelMap = map[string]string{}
 	if err := json.Unmarshal([]byte(modelMap), &p.ModelMap); err != nil {
 		return p, fmt.Errorf("decode provider %s model map: %w", p.ID, err)
+	}
+	p.ModelAllowlist = []string{}
+	if err := json.Unmarshal([]byte(modelAllowlist), &p.ModelAllowlist); err != nil {
+		return p, fmt.Errorf("decode provider %s model allowlist: %w", p.ID, err)
 	}
 	p.CreatedAt = parseTime(created)
 	p.UpdatedAt = parseTime(updated)
@@ -1545,11 +1716,11 @@ func scanBalance(row rowScanner) (model.Balance, error) {
 
 func (s *Store) scanKey(row rowScanner) (model.Key, error) {
 	var k model.Key
-	var secretCipher, modelMap string
-	var pEnabled, enabled, preferred int
+	var secretCipher, modelMap, modelAllowlist string
+	var pEnabled, modelAllowlistEnabled, enabled, preferred int
 	var cooldown, lastUsed sql.NullString
 	var lastStatus sql.NullInt64
-	if err := row.Scan(&k.ID, &k.ProviderID, &k.ProviderName, &k.ProviderType, &k.ProviderBaseURL, &k.ProviderPriority, &pEnabled, &modelMap, &k.ProviderBalancePath,
+	if err := row.Scan(&k.ID, &k.ProviderID, &k.ProviderName, &k.ProviderType, &k.ProviderBaseURL, &k.ProviderPriority, &pEnabled, &modelMap, &modelAllowlistEnabled, &modelAllowlist, &k.ProviderBalancePath,
 		&k.Name, &secretCipher, &k.Priority, &enabled, &preferred,
 		&k.ConsecutiveFailures, &cooldown, &k.LastError, &lastStatus, &k.SuccessCount, &k.FailureCount, &lastUsed); err != nil {
 		return k, err
@@ -1561,11 +1732,16 @@ func (s *Store) scanKey(row rowScanner) (model.Key, error) {
 	k.Secret = secret
 	k.KeyHint = MaskSecret(secret)
 	k.ProviderEnabled = pEnabled == 1
+	k.ProviderModelAllowlistEnabled = modelAllowlistEnabled == 1
 	k.Enabled = enabled == 1
 	k.ManualPreferred = preferred == 1
 	k.ProviderModelMap = map[string]string{}
 	if err := json.Unmarshal([]byte(modelMap), &k.ProviderModelMap); err != nil {
 		return k, fmt.Errorf("decode provider %s model map: %w", k.ProviderID, err)
+	}
+	k.ProviderModelAllowlist = []string{}
+	if err := json.Unmarshal([]byte(modelAllowlist), &k.ProviderModelAllowlist); err != nil {
+		return k, fmt.Errorf("decode provider %s model allowlist: %w", k.ProviderID, err)
 	}
 	if cooldown.Valid {
 		t := parseTime(cooldown.String)

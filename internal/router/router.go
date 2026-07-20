@@ -3,6 +3,7 @@ package router
 import (
 	"context"
 	"errors"
+	"net/http"
 	"sort"
 	"strings"
 	"sync"
@@ -61,7 +62,7 @@ func (r *Router) AcquireRecoveryProbe(key model.Key) (func(), bool) {
 		probeIDs = append(probeIDs, "key:"+key.ID)
 	}
 	if key.ModelCooldownUntil != nil && !key.ModelCooldownUntil.After(now) {
-		probeIDs = append(probeIDs, "model:"+modelStateKey(key.ProviderID, key.UpstreamModel))
+		probeIDs = append(probeIDs, "model:"+modelStateKey(key.ProviderID, key.ID, key.UpstreamModel))
 	}
 	if len(probeIDs) == 0 {
 		return func() {}, true
@@ -113,7 +114,10 @@ func (r *Router) Candidates(ctx context.Context, modelName string, inboundProtoc
 		if k.UpstreamModel == "" {
 			continue
 		}
-		if state, ok := modelStates[modelStateKey(k.ProviderID, k.UpstreamModel)]; ok {
+		if !ProviderAllowsModel(k.ProviderType, k.ProviderModelAllowlistEnabled, k.ProviderModelAllowlist, k.UpstreamModel) {
+			continue
+		}
+		if state, ok := modelStates[modelStateKey(k.ProviderID, k.ID, k.UpstreamModel)]; ok {
 			if state.CooldownUntil != nil && state.CooldownUntil.After(now) {
 				continue
 			}
@@ -151,15 +155,18 @@ func routeCandidates(keys []model.Key, route model.ModelRoute, modelStates map[s
 			if !target.Enabled {
 				continue
 			}
-			state, hasState := modelStates[modelStateKey(target.ProviderID, target.UpstreamModel)]
-			if hasState && state.CooldownUntil != nil && state.CooldownUntil.After(now) {
-				continue
-			}
 			for _, key := range keys {
 				if key.ProviderID != target.ProviderID || !key.Enabled || !key.ProviderEnabled {
 					continue
 				}
 				if key.CooldownUntil != nil && key.CooldownUntil.After(now) {
+					continue
+				}
+				if !ProviderAllowsModel(key.ProviderType, key.ProviderModelAllowlistEnabled, key.ProviderModelAllowlist, target.UpstreamModel) {
+					continue
+				}
+				state, hasState := modelStates[modelStateKey(target.ProviderID, key.ID, target.UpstreamModel)]
+				if hasState && state.CooldownUntil != nil && state.CooldownUntil.After(now) {
 					continue
 				}
 				upstreamProtocol := ChooseUpstreamProtocol(inboundProtocol, key)
@@ -180,7 +187,45 @@ func routeCandidates(keys []model.Key, route model.ModelRoute, modelStates map[s
 			}
 		}
 	}
+	sort.SliceStable(out, func(i, j int) bool {
+		a, b := out[i], out[j]
+		if a.ModelPriority != b.ModelPriority {
+			return a.ModelPriority > b.ModelPriority
+		}
+		if a.RouteModel != b.RouteModel {
+			return a.RouteModel < b.RouteModel
+		}
+		if a.ProviderPriority != b.ProviderPriority {
+			return a.ProviderPriority > b.ProviderPriority
+		}
+		if a.ManualPreferred != b.ManualPreferred {
+			return a.ManualPreferred
+		}
+		if a.Priority != b.Priority {
+			return a.Priority > b.Priority
+		}
+		if a.ProviderID != b.ProviderID {
+			return a.ProviderID < b.ProviderID
+		}
+		if a.ID != b.ID {
+			return a.ID < b.ID
+		}
+		return a.UpstreamModel < b.UpstreamModel
+	})
 	return out
+}
+
+func ProviderAllowsModel(providerType string, allowlistEnabled bool, allowlist []string, modelID string) bool {
+	if !allowlistEnabled {
+		return true
+	}
+	modelID = model.NormalizeModelID(providerType, modelID)
+	for _, allowed := range allowlist {
+		if model.NormalizeModelID(providerType, allowed) == modelID {
+			return true
+		}
+	}
+	return false
 }
 
 func (r *Router) RecordSuccess(ctx context.Context, key model.Key) error {
@@ -198,7 +243,7 @@ func (r *Router) RecordCandidateSuccess(ctx context.Context, key model.Key) erro
 	keyErr := r.RecordSuccess(ctx, key)
 	var modelErr error
 	if key.ProviderID != "" && key.UpstreamModel != "" {
-		modelErr = r.store.RecordProviderModelSuccess(ctx, key.ProviderID, key.UpstreamModel)
+		modelErr = r.store.RecordProviderModelSuccess(ctx, key.ProviderID, key.ID, key.UpstreamModel)
 	}
 	if key.ModelCooldownUntil != nil {
 		r.invalidateCache()
@@ -247,7 +292,7 @@ func (r *Router) RecordCandidateFailure(ctx context.Context, key model.Key, f Fa
 	if f.RetryAfterSeconds > 0 {
 		policy.OverrideCooldown = time.Duration(f.RetryAfterSeconds) * time.Second
 	}
-	if err := r.store.RecordProviderModelFailure(ctx, key.ProviderID, key.UpstreamModel, statusPtr, f.Message, policy); err != nil {
+	if err := r.store.RecordProviderModelFailure(ctx, key.ProviderID, key.ID, key.UpstreamModel, statusPtr, f.Message, policy); err != nil {
 		return err
 	}
 	r.invalidateCache()
@@ -282,14 +327,14 @@ func (r *Router) routingData(ctx context.Context) ([]model.Key, map[string]model
 	}
 	r.cachedModelStates = make(map[string]model.ProviderModelState, len(states))
 	for _, state := range states {
-		r.cachedModelStates[modelStateKey(state.ProviderID, state.ModelID)] = state
+		r.cachedModelStates[modelStateKey(state.ProviderID, state.KeyID, state.ModelID)] = state
 	}
 	r.cacheUntil = time.Now().Add(routingCacheTTL)
 	return append([]model.Key(nil), keys...), r.cachedRoutes, r.cachedModelStates, nil
 }
 
-func modelStateKey(providerID, modelID string) string {
-	return providerID + "\x00" + modelID
+func modelStateKey(providerID, keyID, modelID string) string {
+	return providerID + "\x00" + keyID + "\x00" + modelID
 }
 
 func (r *Router) invalidateCache() {
@@ -352,18 +397,41 @@ func CountsAgainstModelHealth(errorType string) bool {
 	return errorType == "model_unavailable"
 }
 
+// ProviderModelUnavailable distinguishes a model that the upstream does not implement from a
+// key-specific entitlement error. Only definitive absence/unsupported signals are provider-wide.
+func ProviderModelUnavailable(status int, message string) bool {
+	text := strings.ToLower(message)
+	if !isModelUnavailable(status, text) {
+		return false
+	}
+	normalized := strings.NewReplacer("_", " ", "-", " ", ".", " ").Replace(text)
+	for _, marker := range []string{
+		"model not found", "model does not exist", "unknown model", "unsupported model", "invalid model",
+		"模型不存在", "未找到模型", "找不到模型", "不支持该模型", "模型不支持",
+	} {
+		if strings.Contains(normalized, marker) || strings.Contains(text, marker) {
+			return true
+		}
+	}
+	return status == http.StatusNotFound && (strings.Contains(normalized, "model") || strings.Contains(text, "模型"))
+}
+
 func isModelUnavailable(status int, text string) bool {
 	if status != 400 && status != 403 && status != 404 && status != 422 {
 		return false
 	}
-	if !strings.Contains(text, "model") {
+	normalized := strings.NewReplacer("_", " ", "-", " ", ".", " ").Replace(text)
+	if !strings.Contains(normalized, "model") && !strings.Contains(text, "模型") {
 		return false
 	}
 	for _, marker := range []string{
 		"not found", "does not exist", "unavailable", "not available", "unsupported",
 		"invalid model", "no access", "permission", "not enabled", "disabled",
+		"模型不存在", "未找到模型", "找不到模型", "模型不可用", "无可用模型",
+		"不支持该模型", "模型不支持", "模型未启用", "模型已禁用", "模型无权限",
+		"没有模型权限", "无权访问模型", "无可用渠道",
 	} {
-		if strings.Contains(text, marker) {
+		if strings.Contains(normalized, marker) || strings.Contains(text, marker) {
 			return true
 		}
 	}

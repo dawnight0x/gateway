@@ -40,6 +40,16 @@ type keyTestResult struct {
 	CheckedAt        string   `json:"checkedAt"`
 }
 
+const (
+	maxModelDiscoveryPages  = 100
+	maxDiscoveredModelCount = 5000
+)
+
+type modelPageCursor struct {
+	QueryParam string
+	Value      string
+}
+
 func (s *Service) testUpstreamKey(ctx context.Context, id string) keyTestResult {
 	result := keyTestResult{KeyID: id, Status: "not_found", Error: "upstream key not found", CheckedAt: time.Now().UTC().Format(time.RFC3339)}
 	keys, err := s.store.ListKeys(ctx)
@@ -116,85 +126,142 @@ func (s *Service) discoverModelsAtPath(ctx context.Context, key model.Key, path 
 		result.Error = err.Error()
 		return result
 	}
-	result.Endpoint = endpoint
 	timeoutSeconds := s.cfg.ModelDiscovery.TimeoutSeconds
 	if timeoutSeconds <= 0 || timeoutSeconds > 120 {
 		timeoutSeconds = 30
 	}
 	client := keyTestHTTPClient(timeoutSeconds)
-	var resp *http.Response
-	for attempt := 0; attempt < 2; attempt++ {
-		reqCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSeconds)*time.Second)
-		req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, endpoint, nil)
-		if err != nil {
-			cancel()
-			result.Status = "config_error"
-			result.Error = err.Error()
+	currentEndpoint := endpoint
+	models := make([]string, 0)
+	seenModels := make(map[string]struct{})
+	seenCursors := make(map[string]struct{})
+	completed := false
+	for page := 0; page < maxModelDiscoveryPages; page++ {
+		result.Endpoint = currentEndpoint
+		status, body, latency, requestErr := fetchModelPage(ctx, client, key, currentEndpoint, timeoutSeconds)
+		result.LatencyMS += latency
+		if requestErr != nil {
+			result.Status = "network_error"
+			result.Error = redactSecret(sanitizeBalanceError(requestErr.Error()), key.Secret)
 			return result
 		}
-		req.Header.Set("Accept", "application/json")
-		setUpstreamAuthHeaders(req, key)
-		req.Header.Set("User-Agent", "Local-AI-Gateway/1.0")
-
-		start := time.Now()
-		resp, err = client.Do(req)
-		result.LatencyMS = time.Since(start).Milliseconds()
-		if err == nil {
-			defer cancel()
+		result.StatusCode = status
+		if status < 200 || status >= 300 {
+			result.Status = classifyBalanceError(status, string(body))
+			result.Error = redactSecret(sanitizeBalanceError(fmt.Sprintf("status %d: %s", status, string(body))), key.Secret)
+			return result
+		}
+		pageModels, _, cursor, parseErr := parseModelPage(body, key.ProviderType)
+		if parseErr != nil {
+			result.Status = "parse_error"
+			result.Error = redactSecret(sanitizeBalanceError(parseErr.Error()), key.Secret)
+			return result
+		}
+		for _, modelID := range pageModels {
+			modelID = model.NormalizeModelID(key.ProviderType, modelID)
+			if modelID == "" || len(modelID) > 512 {
+				continue
+			}
+			if _, exists := seenModels[modelID]; exists {
+				continue
+			}
+			seenModels[modelID] = struct{}{}
+			models = append(models, modelID)
+			if len(models) >= maxDiscoveredModelCount {
+				completed = true
+				break
+			}
+		}
+		if completed || cursor == nil {
+			completed = true
 			break
 		}
-		cancel()
-		if attempt == 1 || !retryableKeyTestError(err) {
-			result.Status = "network_error"
-			result.Error = redactSecret(sanitizeBalanceError(err.Error()), key.Secret)
+		cursorKey := cursor.QueryParam + "\x00" + cursor.Value
+		if _, duplicate := seenCursors[cursorKey]; duplicate {
+			result.Status = "parse_error"
+			result.Error = "model endpoint repeated a pagination cursor"
 			return result
 		}
-		if err := waitForRetry(ctx, 300*time.Millisecond); err != nil {
-			result.Status = "network_error"
+		seenCursors[cursorKey] = struct{}{}
+		currentEndpoint, err = withModelPageCursor(endpoint, *cursor)
+		if err != nil {
+			result.Status = "parse_error"
 			result.Error = err.Error()
 			return result
 		}
 	}
-	defer resp.Body.Close()
-	result.StatusCode = resp.StatusCode
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if err != nil {
-		result.Status = "network_error"
-		result.Error = redactSecret(sanitizeBalanceError(err.Error()), key.Secret)
-		return result
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		result.Status = classifyBalanceError(resp.StatusCode, string(body))
-		result.Error = redactSecret(sanitizeBalanceError(fmt.Sprintf("status %d: %s", resp.StatusCode, string(body))), key.Secret)
-		return result
-	}
-	models, count, err := parseModels(body)
-	if err != nil {
+	if !completed {
 		result.Status = "parse_error"
-		result.Error = redactSecret(sanitizeBalanceError(err.Error()), key.Secret)
+		result.Error = fmt.Sprintf("model endpoint exceeded %d pagination pages", maxModelDiscoveryPages)
 		return result
 	}
-	result.Status = "ok"
+	count := len(models)
 	result.ConnectionStatus = "ok"
-	result.ModelCount = count
+	result.ModelCount = &count
 	result.Models = trimModelList(models, 300)
 	if len(models) == 0 {
 		result.Status = "empty"
 		result.Error = "model endpoint returned no models"
 		return result
 	}
-	if err := s.store.ReplaceProviderModels(ctx, key.ProviderID, models); err != nil {
+	result.Status = "ok"
+	if err := s.store.ReplaceProviderKeyModels(ctx, key.ProviderID, key.ID, models); err != nil {
 		result.Status = "storage_error"
 		result.Error = "connected successfully but failed to cache discovered models"
 		return result
 	}
-	if err := s.store.RecordProviderModelDiscoverySuccess(ctx, key.ProviderID, len(models)); err != nil {
+	providerModelCount, err := s.store.CountProviderModels(ctx, key.ProviderID)
+	if err != nil {
+		result.Status = "storage_error"
+		result.Error = "connected successfully but failed to count discovered models"
+		return result
+	}
+	if err := s.store.RecordProviderModelDiscoverySuccess(ctx, key.ProviderID, providerModelCount); err != nil {
 		result.Status = "storage_error"
 		result.Error = "connected successfully but failed to save model discovery state"
 		return result
 	}
 	result.Model = selectProbeModel(key, models)
 	return result
+}
+
+func fetchModelPage(ctx context.Context, client *http.Client, key model.Key, endpoint string, timeoutSeconds int) (int, []byte, int64, error) {
+	var totalLatency int64
+	for attempt := 0; attempt < 2; attempt++ {
+		reqCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSeconds)*time.Second)
+		req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, endpoint, nil)
+		if err != nil {
+			cancel()
+			return 0, nil, totalLatency, err
+		}
+		req.Header.Set("Accept", "application/json")
+		setUpstreamAuthHeaders(req, key)
+		req.Header.Set("User-Agent", "Local-AI-Gateway/1.0")
+		start := time.Now()
+		resp, err := client.Do(req)
+		totalLatency += time.Since(start).Milliseconds()
+		if err != nil {
+			cancel()
+			if attempt == 1 || !retryableKeyTestError(err) {
+				return 0, nil, totalLatency, err
+			}
+			if err := waitForRetry(ctx, 300*time.Millisecond); err != nil {
+				return 0, nil, totalLatency, err
+			}
+			continue
+		}
+		body, readErr := io.ReadAll(io.LimitReader(resp.Body, (1<<20)+1))
+		_ = resp.Body.Close()
+		cancel()
+		if readErr != nil {
+			return resp.StatusCode, nil, totalLatency, readErr
+		}
+		if len(body) > 1<<20 {
+			return resp.StatusCode, nil, totalLatency, fmt.Errorf("model response exceeds 1 MiB limit")
+		}
+		return resp.StatusCode, body, totalLatency, nil
+	}
+	return 0, nil, totalLatency, fmt.Errorf("model request failed")
 }
 
 func (s *Service) tryTokenProbe(ctx context.Context, key model.Key, result *keyTestResult) {
@@ -318,6 +385,9 @@ func testPathsForKey(key model.Key) []string {
 		}
 		return []string{"/models", "/v1/models"}
 	case model.ProviderGeminiCompatible:
+		if strings.HasSuffix(base, "/v1beta") || strings.HasSuffix(base, "/v1") {
+			return []string{"/models"}
+		}
 		return []string{"/v1beta/models"}
 	case model.ProviderAnthropicCompatible:
 		return []string{"/v1/models", "/models"}
@@ -327,7 +397,7 @@ func testPathsForKey(key model.Key) []string {
 }
 
 func tokenProbeRequest(key model.Key, modelID string) (string, []byte, error) {
-	modelID = strings.TrimSpace(modelID)
+	modelID = model.NormalizeModelID(key.ProviderType, modelID)
 	base := strings.TrimRight(strings.ToLower(key.ProviderBaseURL), "/")
 	var path string
 	var payload map[string]any
@@ -387,6 +457,75 @@ func parseModels(body []byte) ([]string, *int, error) {
 	}
 	parsed := collectModels(raw, false)
 	return parsed.IDs, parsed.Count, nil
+}
+
+func parseModelPage(body []byte, providerType string) ([]string, *int, *modelPageCursor, error) {
+	if len(strings.TrimSpace(string(body))) == 0 {
+		return nil, nil, nil, nil
+	}
+	var raw any
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return nil, nil, nil, err
+	}
+	parsed := collectModels(raw, false)
+	cursor, err := nextModelPageCursor(raw, providerType)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	return parsed.IDs, parsed.Count, cursor, nil
+}
+
+func nextModelPageCursor(raw any, providerType string) (*modelPageCursor, error) {
+	root, ok := raw.(map[string]any)
+	if !ok {
+		return nil, nil
+	}
+	containers := []map[string]any{root}
+	for _, name := range []string{"meta", "pagination"} {
+		if nested, ok := root[name].(map[string]any); ok {
+			containers = append(containers, nested)
+		}
+	}
+	for _, container := range containers {
+		for _, candidate := range []struct {
+			field string
+			query string
+		}{
+			{field: "nextPageToken", query: "pageToken"},
+			{field: "next_page_token", query: "page_token"},
+			{field: "nextCursor", query: "cursor"},
+			{field: "next_cursor", query: "cursor"},
+		} {
+			if value, ok := container[candidate.field].(string); ok && strings.TrimSpace(value) != "" {
+				return &modelPageCursor{QueryParam: candidate.query, Value: strings.TrimSpace(value)}, nil
+			}
+		}
+	}
+	hasMore, _ := root["has_more"].(bool)
+	if !hasMore {
+		return nil, nil
+	}
+	lastID, _ := root["last_id"].(string)
+	lastID = strings.TrimSpace(lastID)
+	if lastID == "" {
+		return nil, fmt.Errorf("model endpoint set has_more without last_id")
+	}
+	query := "after_id"
+	if providerType == model.ProviderGeminiCompatible {
+		query = "pageToken"
+	}
+	return &modelPageCursor{QueryParam: query, Value: lastID}, nil
+}
+
+func withModelPageCursor(endpoint string, cursor modelPageCursor) (string, error) {
+	parsed, err := url.Parse(endpoint)
+	if err != nil {
+		return "", err
+	}
+	query := parsed.Query()
+	query.Set(cursor.QueryParam, cursor.Value)
+	parsed.RawQuery = query.Encode()
+	return parsed.String(), nil
 }
 
 type modelParseResult struct {
@@ -458,18 +597,18 @@ func modelID(raw any) string {
 
 func selectProbeModel(key model.Key, models []string) string {
 	for _, id := range models {
-		if strings.TrimSpace(id) != "" {
-			return strings.TrimSpace(id)
+		if id = model.NormalizeModelID(key.ProviderType, id); id != "" {
+			return id
 		}
 	}
 	for _, mapped := range key.ProviderModelMap {
-		if strings.TrimSpace(mapped) != "" {
-			return strings.TrimSpace(mapped)
+		if mapped = model.NormalizeModelID(key.ProviderType, mapped); mapped != "" {
+			return mapped
 		}
 	}
 	for public := range key.ProviderModelMap {
-		if strings.TrimSpace(public) != "" {
-			return strings.TrimSpace(public)
+		if public = model.NormalizeModelID(key.ProviderType, public); public != "" {
+			return public
 		}
 	}
 	return ""

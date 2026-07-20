@@ -154,22 +154,51 @@
             </div>
           </div>
           <form v-if="providerFormOpen && !providerForm.editingId" class="form-grid top-create-form" data-testid="provider-form" @submit.prevent="saveProvider">
+            <div class="form-intro">
+              <strong>{{ t('provider.addTitle') }}</strong>
+              <small>{{ t('provider.addCopy') }}</small>
+            </div>
             <div v-if="formError" class="form-error">{{ formError }}</div>
-            <input v-model.trim="providerForm.id" :disabled="!!providerForm.editingId" :placeholder="t('placeholder.providerId')">
-            <input v-model.trim="providerForm.name" :placeholder="t('placeholder.name')">
-            <select v-model="providerForm.type">
-              <option v-for="type in providerTypes" :key="type.value" :value="type.value">{{ type.label }}</option>
-            </select>
-            <input v-model.trim="providerForm.baseUrl" :placeholder="t('placeholder.baseUrl')">
-            <input v-model.trim="providerForm.balancePath" :placeholder="t('placeholder.balancePath')">
-            <input v-model.number="providerForm.priority" type="number" min="0" max="1000" :placeholder="t('placeholder.priority')">
-            <div class="model-select-field">
+            <label class="form-field">
+              <span>{{ t('field.providerId') }}</span>
+              <input v-model.trim="providerForm.id" :disabled="!!providerForm.editingId" :placeholder="t('placeholder.providerId')">
+              <small>{{ t('hint.providerId') }}</small>
+            </label>
+            <label class="form-field">
+              <span>{{ t('field.providerName') }}</span>
+              <input v-model.trim="providerForm.name" :placeholder="t('placeholder.name')">
+              <small>{{ t('hint.providerName') }}</small>
+            </label>
+            <label class="form-field">
+              <span>{{ t('field.providerType') }}</span>
+              <select v-model="providerForm.type">
+                <option v-for="type in providerTypes" :key="type.value" :value="type.value">{{ type.label }}</option>
+              </select>
+              <small>{{ t('hint.providerType') }}</small>
+            </label>
+            <label class="form-field">
+              <span>{{ t('field.baseUrl') }}</span>
+              <input v-model.trim="providerForm.baseUrl" :placeholder="t('placeholder.baseUrl')">
+              <small>{{ t('hint.baseUrl') }}</small>
+            </label>
+            <label class="form-field">
+              <span>{{ t('field.balancePath') }}</span>
+              <input v-model.trim="providerForm.balancePath" :placeholder="t('placeholder.balancePath')">
+              <small>{{ t('hint.balancePath') }}</small>
+            </label>
+            <label class="form-field">
+              <span>{{ t('field.providerPriority') }}</span>
+              <input v-model.number="providerForm.priority" type="number" min="0" max="1000" :placeholder="t('placeholder.priority')">
+              <small>{{ t('hint.providerPriority') }}</small>
+            </label>
+            <label class="model-select-field form-field">
+              <span>{{ t('field.defaultModel') }}</span>
               <select v-model="providerForm.defaultModel">
                 <option value="">{{ t('model.useRequestDefault') }}</option>
                 <option v-for="model in providerModelOptions(providerForm.id || providerForm.editingId)" :key="model" :value="model">{{ model }}</option>
               </select>
               <small>{{ t('model.providerHint') }}</small>
-            </div>
+            </label>
             <div class="form-section">
               <template v-if="!providerForm.editingId">
               <strong>{{ t('provider.firstKeyTitle') }}</strong>
@@ -180,9 +209,21 @@
                 <small>{{ providerForm.baseUrl }}</small>
               </template>
             </div>
-            <input v-if="!providerForm.editingId" v-model.trim="providerForm.firstKeyName" :placeholder="t('placeholder.firstKeyName')">
-            <input v-if="!providerForm.editingId" v-model.trim="providerForm.firstKeySecret" type="password" :placeholder="t('placeholder.firstKeySecret')" autocomplete="off">
-            <input v-if="!providerForm.editingId" v-model.number="providerForm.firstKeyPriority" type="number" min="0" max="1000" :placeholder="t('placeholder.keyPriority')">
+            <label v-if="!providerForm.editingId" class="form-field">
+              <span>{{ t('field.keyName') }}</span>
+              <input v-model.trim="providerForm.firstKeyName" :placeholder="t('placeholder.firstKeyName')">
+              <small>{{ t('hint.keyName') }}</small>
+            </label>
+            <label v-if="!providerForm.editingId" class="form-field">
+              <span>{{ t('field.keySecret') }}</span>
+              <input v-model.trim="providerForm.firstKeySecret" type="password" :placeholder="t('placeholder.firstKeySecret')" autocomplete="off">
+              <small>{{ t('hint.keySecret') }}</small>
+            </label>
+            <label v-if="!providerForm.editingId" class="form-field">
+              <span>{{ t('field.keyPriority') }}</span>
+              <input v-model.number="providerForm.firstKeyPriority" type="number" min="0" max="1000" :placeholder="t('placeholder.keyPriority')">
+              <small>{{ t('hint.keyPriority') }}</small>
+            </label>
             <details class="advanced-field">
               <summary>{{ t('provider.modelMapTitle') }}</summary>
               <p>{{ t('provider.modelMapCopy') }}</p>
@@ -294,26 +335,78 @@
                 </div>
                 <small v-else-if="discoveryForProvider(p.id).lastError" class="test-error">{{ discoveryForProvider(p.id).lastError }}</small>
                 <small v-else>{{ t('model.inventoryEmpty') }}</small>
+                <div v-if="providerModelPolicyOptions(p.id).length" class="model-policy">
+                  <div class="model-policy-head">
+                    <div>
+                      <strong>{{ t('model.policyTitle') }}</strong>
+                      <small>{{ t('model.policyCopy') }}</small>
+                    </div>
+                    <label class="check model-policy-toggle">
+                      <input type="checkbox" :checked="modelPolicyDraft(p.id).enabled" @change="setModelPolicyEnabled(p.id, $event.target.checked)">
+                      {{ t('model.policyEnabled') }}
+                    </label>
+                  </div>
+                  <div class="model-policy-toolbar">
+                    <input :value="modelPolicySearch[p.id] || ''" type="search" :placeholder="t('model.search')" @input="modelPolicySearch[p.id] = $event.target.value">
+                    <button class="ghost" type="button" @click="selectProviderModels(p.id, 'all')">{{ t('model.selectAll') }}</button>
+                    <button class="ghost flagship-action" type="button" @click="selectProviderModels(p.id, 'flagship')">{{ t('model.selectFlagship') }}</button>
+                    <button class="ghost" type="button" @click="selectProviderModels(p.id, 'clear')">{{ t('model.clearSelection') }}</button>
+                  </div>
+                  <div class="model-policy-summary">
+                    <small>{{ t('model.selectedCount', { selected: modelPolicyDraft(p.id).models.length, total: providerModelPolicyOptions(p.id).length }) }}</small>
+                    <small v-if="modelPolicyDraft(p.id).enabled && !modelPolicyDraft(p.id).models.length" class="test-error">{{ t('model.emptyPolicyWarning') }}</small>
+                  </div>
+                  <div class="model-policy-list">
+                    <label v-for="model in filteredProviderModelPolicyOptions(p.id)" :key="model" :class="['model-policy-item', {recommended: isFlagshipModel(model)}]">
+                      <input type="checkbox" :checked="modelPolicySelected(p.id, model)" @change="setProviderModelSelected(p.id, model, $event.target.checked)">
+                      <code>{{ model }}</code>
+                      <span v-if="isFlagshipModel(model)" class="flagship-tag">{{ t('model.flagship') }}</span>
+                    </label>
+                  </div>
+                  <div class="model-policy-actions">
+                    <small>{{ modelPolicyDraft(p.id).enabled ? t('model.policyActiveHint') : t('model.policyInactiveHint') }}</small>
+                    <button type="button" :disabled="!modelPolicyDraft(p.id).dirty || modelPolicySavingProviderId === p.id" @click="saveProviderModelPolicy(p)">
+                      {{ modelPolicySavingProviderId === p.id ? t('action.saving') : t('action.saveModelPolicy') }}
+                    </button>
+                  </div>
+                </div>
               </div>
               <form v-if="keyFormOpen && !keyForm.editingId && keyForm.providerId === p.id" class="form-grid inline-edit-form key-inline-form" data-testid="key-form" @submit.prevent="saveKey">
                 <div class="inline-form-heading">
                   <strong>{{ t('action.addKey') }}</strong>
-                  <small>{{ p.name }} · {{ p.baseUrl }}</small>
+                  <small>{{ t('key.addCopy') }} · {{ p.name }} · {{ p.baseUrl }}</small>
                 </div>
                 <div v-if="formError" class="form-error">{{ formError }}</div>
-                <select v-model="keyForm.providerId" disabled>
-                  <option v-for="provider in providers" :key="provider.id" :value="provider.id">{{ provider.name }} ({{ provider.id }})</option>
-                </select>
-                <input v-model.trim="keyForm.name" :placeholder="t('placeholder.keyDisplayName')">
-                <input v-model.trim="keyForm.secret" type="password" :placeholder="t('placeholder.secret')" autocomplete="off">
-                <input v-model.number="keyForm.priority" type="number" min="0" max="1000" :placeholder="t('placeholder.priority')">
-                <div class="model-select-field">
+                <label class="form-field">
+                  <span>{{ t('table.provider') }}</span>
+                  <select v-model="keyForm.providerId" disabled>
+                    <option v-for="provider in providers" :key="provider.id" :value="provider.id">{{ provider.name }} ({{ provider.id }})</option>
+                  </select>
+                  <small>{{ t('hint.keyProvider') }}</small>
+                </label>
+                <label class="form-field">
+                  <span>{{ t('field.keyName') }}</span>
+                  <input v-model.trim="keyForm.name" :placeholder="t('placeholder.keyDisplayName')">
+                  <small>{{ t('hint.keyName') }}</small>
+                </label>
+                <label class="form-field">
+                  <span>{{ t('field.keySecret') }}</span>
+                  <input v-model.trim="keyForm.secret" type="password" :placeholder="t('placeholder.secret')" autocomplete="off">
+                  <small>{{ t('hint.keySecret') }}</small>
+                </label>
+                <label class="form-field">
+                  <span>{{ t('field.keyPriority') }}</span>
+                  <input v-model.number="keyForm.priority" type="number" min="0" max="1000" :placeholder="t('placeholder.priority')">
+                  <small>{{ t('hint.keyPriority') }}</small>
+                </label>
+                <label class="model-select-field form-field">
+                  <span>{{ t('field.defaultModel') }}</span>
                   <select v-model="keyForm.defaultModel">
                     <option value="">{{ t('model.useRequestDefault') }}</option>
                     <option v-for="model in providerModelOptions(keyForm.providerId)" :key="model" :value="model">{{ model }}</option>
                   </select>
                   <small>{{ t('model.keyHint') }}</small>
-                </div>
+                </label>
                 <label class="check"><input v-model="keyForm.enabled" type="checkbox"> {{ t('status.enabled') }}</label>
                 <div class="form-actions">
                   <button class="ghost" type="button" data-testid="cancel-key" @click="cancelKeyForm">{{ t('action.cancel') }}</button>
@@ -486,7 +579,7 @@
                     <span class="target-branch" aria-hidden="true"></span>
                     <select v-model="target.providerId" :aria-label="t('table.provider')" required>
                       <option value="" disabled>{{ t('placeholder.selectProvider') }}</option>
-                      <option v-for="provider in providers" :key="provider.id" :value="provider.id">{{ provider.name }} · P{{ provider.priority }}</option>
+                      <option v-for="provider in providers" :key="provider.id" :value="provider.id" :disabled="routeProviderSelected(modelIndex, targetIndex, provider.id)">{{ provider.name }} · P{{ provider.priority }}</option>
                     </select>
                     <input v-model.trim="target.upstreamModel" :list="`route-models-${modelIndex}-${targetIndex}`" :aria-label="t('modelRouting.upstreamModel')" :placeholder="t('modelRouting.upstreamModel')" maxlength="512" required>
                     <datalist :id="`route-models-${modelIndex}-${targetIndex}`">
@@ -533,7 +626,14 @@
                     <span v-for="target in routeModel.targets" :key="target.providerId + ':' + target.upstreamModel" :class="['route-target-chip', {disabled: !target.enabled}]">
                       <strong>{{ providerDisplayName(target.providerId) }}</strong>
                       <code>{{ target.upstreamModel }}</code>
-                      <small v-if="modelStateFor(target.providerId, target.upstreamModel)?.cooldownUntil">{{ t('status.cooling') }}</small>
+                      <small v-if="modelCoolingCount(target.providerId, target.upstreamModel)">{{ t('modelRouting.coolingKeys', { count: modelCoolingCount(target.providerId, target.upstreamModel) }) }}</small>
+                      <button
+                        v-if="modelHasFailureState(target.providerId, target.upstreamModel)"
+                        class="route-state-reset"
+                        type="button"
+                        :title="t('modelRouting.resetHealth')"
+                        @click="resetModelState(target.providerId, target.upstreamModel)"
+                      >{{ t('action.reset') }}</button>
                     </span>
                   </div>
                 </div>
@@ -620,6 +720,7 @@
                 <label><span>{{ t('routing.timeoutSeconds') }}</span><input v-model.number="routing.timeoutSeconds" type="number" min="1"></label>
                 <label><span>{{ t('routing.maxConcurrentRequests') }}</span><input v-model.number="routing.maxConcurrentRequests" type="number" min="0"></label>
                 <label class="check"><input v-model="routing.streamRetryBeforeFirstByte" type="checkbox"> {{ t('routing.streamRetryBeforeFirstByte') }}</label>
+                <label class="check"><input v-model="routing.fallbackOnBusy" type="checkbox"> {{ t('routing.fallbackOnBusy') }}</label>
               </div>
             </div>
             <div class="routing-advanced-toggle">
@@ -726,6 +827,15 @@
                     <code>{{ log.model || '-' }}</code>
                     <small v-if="log.upstreamModel && log.upstreamModel !== log.model">{{ log.upstreamModel }}</small>
                     <small v-if="log.routeId">{{ log.routeId }} · {{ log.attempts || 1 }} {{ t('logs.attempts') }}</small>
+                    <details v-if="log.attemptTrace?.length" class="log-attempt-trace">
+                      <summary>{{ t('logs.trace') }} ({{ log.attemptTrace.length }}{{ log.traceTruncated ? '+' : '' }})</summary>
+                      <div v-for="attempt in log.attemptTrace" :key="attempt.sequence" class="log-attempt-row">
+                        <strong>#{{ attempt.sequence }} · {{ providerDisplayName(attempt.providerId) }} / {{ keyDisplayName(attempt.keyId) }}</strong>
+                        <code>{{ attempt.upstreamModel }} · {{ logProtocolLabel(attempt.upstreamProtocol) }}</code>
+                        <span>{{ attempt.status || '-' }} · {{ attempt.latencyMs }}ms · {{ attempt.errorType || t('dashboard.requestSuccess') }}</span>
+                      </div>
+                      <small v-if="log.traceTruncated">{{ t('logs.traceTruncated') }}</small>
+                    </details>
                   </td>
                   <td>{{ log.providerId || '-' }}</td>
                   <td>{{ log.keyId || '-' }}</td>

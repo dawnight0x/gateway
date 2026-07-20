@@ -27,14 +27,16 @@ import (
 )
 
 type providerInput struct {
-	ID          string            `json:"id"`
-	Name        string            `json:"name"`
-	Type        string            `json:"type"`
-	BaseURL     string            `json:"baseUrl"`
-	Priority    *int              `json:"priority"`
-	Enabled     *bool             `json:"enabled"`
-	ModelMap    map[string]string `json:"modelMap"`
-	BalancePath *string           `json:"balancePath"`
+	ID                    string            `json:"id"`
+	Name                  string            `json:"name"`
+	Type                  string            `json:"type"`
+	BaseURL               string            `json:"baseUrl"`
+	Priority              *int              `json:"priority"`
+	Enabled               *bool             `json:"enabled"`
+	ModelMap              map[string]string `json:"modelMap"`
+	ModelAllowlistEnabled *bool             `json:"modelAllowlistEnabled"`
+	ModelAllowlist        []string          `json:"modelAllowlist"`
+	BalancePath           *string           `json:"balancePath"`
 }
 
 type keyInput struct {
@@ -171,6 +173,8 @@ func (s *Service) api(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, s.cfg.Routing)
 	case "model-routes":
 		s.modelRoutes(w, r, parts)
+	case "model-states":
+		s.modelStates(w, r, parts)
 	case "setup-snippets":
 		if !requireMethod(w, r, http.MethodGet) {
 			return
@@ -248,9 +252,10 @@ func writeLogCSV(w http.ResponseWriter, logs []model.RequestLog) {
 	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
 	w.Header().Set("Content-Disposition", `attachment; filename="gateway-request-logs.csv"`)
 	writer := csv.NewWriter(w)
-	_ = writer.Write([]string{"request_id", "created_at", "protocol", "provider_id", "key_id", "model", "route_id", "upstream_model", "attempts", "status", "latency_ms", "prompt_tokens", "completion_tokens", "total_tokens", "error_type"})
+	_ = writer.Write([]string{"request_id", "created_at", "protocol", "provider_id", "key_id", "model", "route_id", "upstream_model", "attempts", "attempt_trace", "trace_truncated", "status", "latency_ms", "prompt_tokens", "completion_tokens", "total_tokens", "error_type"})
 	for _, item := range logs {
-		_ = writer.Write([]string{item.RequestID, item.CreatedAt.Format(time.RFC3339), item.InboundProtocol, item.ProviderID, item.KeyID, item.Model, item.RouteID, item.UpstreamModel, strconv.Itoa(item.Attempts), strconv.Itoa(item.Status), strconv.FormatInt(item.LatencyMS, 10), optionalInt(item.PromptTokens), optionalInt(item.CompletionTokens), optionalInt(item.TotalTokens), item.ErrorType})
+		attemptTrace, _ := json.Marshal(item.AttemptTrace)
+		_ = writer.Write([]string{item.RequestID, item.CreatedAt.Format(time.RFC3339), item.InboundProtocol, item.ProviderID, item.KeyID, item.Model, item.RouteID, item.UpstreamModel, strconv.Itoa(item.Attempts), string(attemptTrace), strconv.FormatBool(item.TraceTruncated), strconv.Itoa(item.Status), strconv.FormatInt(item.LatencyMS, 10), optionalInt(item.PromptTokens), optionalInt(item.CompletionTokens), optionalInt(item.TotalTokens), item.ErrorType})
 	}
 	writer.Flush()
 }
@@ -582,12 +587,13 @@ func (s *Service) providers(w http.ResponseWriter, r *http.Request, parts []stri
 			return
 		}
 		p := model.Provider{
-			ID:       input.ID,
-			Name:     input.Name,
-			Type:     input.Type,
-			BaseURL:  input.BaseURL,
-			ModelMap: input.ModelMap,
-			Enabled:  true,
+			ID:             input.ID,
+			Name:           input.Name,
+			Type:           input.Type,
+			BaseURL:        input.BaseURL,
+			ModelMap:       input.ModelMap,
+			ModelAllowlist: input.ModelAllowlist,
+			Enabled:        true,
 		}
 		if input.BalancePath != nil {
 			p.BalancePath = *input.BalancePath
@@ -597,6 +603,9 @@ func (s *Service) providers(w http.ResponseWriter, r *http.Request, parts []stri
 		}
 		if input.Enabled != nil {
 			p.Enabled = *input.Enabled
+		}
+		if input.ModelAllowlistEnabled != nil {
+			p.ModelAllowlistEnabled = *input.ModelAllowlistEnabled
 		}
 		if id != "" {
 			p.ID = id
@@ -620,6 +629,7 @@ func (s *Service) providers(w http.ResponseWriter, r *http.Request, parts []stri
 		p.Type = strings.TrimSpace(p.Type)
 		p.BaseURL = strings.TrimRight(strings.TrimSpace(p.BaseURL), "/")
 		p.BalancePath = strings.TrimSpace(p.BalancePath)
+		p.ModelAllowlist = normalizeModelAllowlist(p.Type, p.ModelAllowlist)
 		if err := validateProvider(p); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
 			return
@@ -809,6 +819,12 @@ func mergeProvider(current model.Provider, patch providerInput) model.Provider {
 	if patch.ModelMap != nil {
 		current.ModelMap = patch.ModelMap
 	}
+	if patch.ModelAllowlistEnabled != nil {
+		current.ModelAllowlistEnabled = *patch.ModelAllowlistEnabled
+	}
+	if patch.ModelAllowlist != nil {
+		current.ModelAllowlist = patch.ModelAllowlist
+	}
 	if patch.BalancePath != nil {
 		current.BalancePath = *patch.BalancePath
 	}
@@ -843,6 +859,14 @@ func validateProvider(p model.Provider) error {
 			return fmt.Errorf("modelMap names must not have leading or trailing whitespace")
 		}
 	}
+	if len(p.ModelAllowlist) > maxDiscoveredModelCount {
+		return fmt.Errorf("modelAllowlist must contain at most %d models", maxDiscoveredModelCount)
+	}
+	for _, modelID := range p.ModelAllowlist {
+		if modelID == "" || len(modelID) > 512 {
+			return fmt.Errorf("modelAllowlist entries must be 1-512 characters")
+		}
+	}
 	if balancePath := strings.TrimSpace(p.BalancePath); balancePath != "" {
 		u, err := url.Parse(balancePath)
 		if err != nil {
@@ -864,6 +888,23 @@ func validateProvider(p model.Provider) error {
 		}
 	}
 	return nil
+}
+
+func normalizeModelAllowlist(providerType string, values []string) []string {
+	out := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		value = model.NormalizeModelID(providerType, value)
+		if value == "" {
+			continue
+		}
+		if _, exists := seen[value]; exists {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
 }
 
 func validateHTTPURL(field, raw string) error {

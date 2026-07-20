@@ -85,6 +85,14 @@ func (s *Service) validateModelRoute(ctx context.Context, route *model.ModelRout
 	if len(route.Name) > 256 {
 		return fmt.Errorf("model route name must not exceed 256 characters")
 	}
+	providers, err := s.store.ListProviders(ctx)
+	if err != nil {
+		return err
+	}
+	providerTypes := make(map[string]string, len(providers))
+	for _, provider := range providers {
+		providerTypes[provider.ID] = provider.Type
+	}
 	modelNames := make(map[string]struct{})
 	activeTargets := 0
 	for modelIndex := range route.Models {
@@ -101,13 +109,22 @@ func (s *Service) validateModelRoute(ctx context.Context, route *model.ModelRout
 		}
 		modelNames[item.Name] = struct{}{}
 		targets := make(map[string]struct{})
+		providersInLayer := make(map[string]struct{})
 		for targetIndex := range item.Targets {
 			target := &item.Targets[targetIndex]
 			target.ProviderID = strings.TrimSpace(target.ProviderID)
-			target.UpstreamModel = strings.TrimSpace(target.UpstreamModel)
+			providerType, exists := providerTypes[target.ProviderID]
+			if !exists {
+				return fmt.Errorf("provider %q does not exist", target.ProviderID)
+			}
+			target.UpstreamModel = model.NormalizeModelID(providerType, target.UpstreamModel)
 			if target.ProviderID == "" || target.UpstreamModel == "" || len(target.UpstreamModel) > 512 {
 				return fmt.Errorf("model route targets require a provider and a 1-512 character upstream model")
 			}
+			if _, duplicate := providersInLayer[target.ProviderID]; duplicate {
+				return fmt.Errorf("route model %q can contain only one target for provider %q", item.Name, target.ProviderID)
+			}
+			providersInLayer[target.ProviderID] = struct{}{}
 			key := target.ProviderID + "\x00" + target.UpstreamModel
 			if _, duplicate := targets[key]; duplicate {
 				return fmt.Errorf("duplicate target for provider %q and model %q", target.ProviderID, target.UpstreamModel)
@@ -120,21 +137,6 @@ func (s *Service) validateModelRoute(ctx context.Context, route *model.ModelRout
 	}
 	if route.Enabled && activeTargets == 0 {
 		return fmt.Errorf("an enabled model route requires at least one enabled target")
-	}
-	providers, err := s.store.ListProviders(ctx)
-	if err != nil {
-		return err
-	}
-	providerIDs := make(map[string]struct{}, len(providers))
-	for _, provider := range providers {
-		providerIDs[provider.ID] = struct{}{}
-	}
-	for _, item := range route.Models {
-		for _, target := range item.Targets {
-			if _, exists := providerIDs[target.ProviderID]; !exists {
-				return fmt.Errorf("provider %q does not exist", target.ProviderID)
-			}
-		}
 	}
 	return nil
 }

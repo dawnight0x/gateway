@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"local-ai-gateway/internal/model"
 	"local-ai-gateway/internal/router"
 )
 
@@ -62,6 +63,7 @@ func UpstreamPath(inboundPath, upstreamProtocol, modelName string, stream bool) 
 		if stream || strings.Contains(inboundPath, ":streamGenerateContent") {
 			action = ":streamGenerateContent"
 		}
+		modelName = model.NormalizeModelID(model.ProviderGeminiCompatible, modelName)
 		return "/v1beta/models/" + url.PathEscape(modelName) + action
 	default:
 		if strings.Contains(inboundPath, "/responses") {

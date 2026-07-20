@@ -109,7 +109,7 @@ func TestNativeGeminiKeepsModelOnlyInPath(t *testing.T) {
 	if _, ok := raw["model"]; ok {
 		t.Fatalf("native Gemini body unexpectedly contains model: %s", out.Body)
 	}
-	path := UpstreamPath("/v1beta/models/public-gemini:generateContent", router.ProtocolGemini, "gemini-2.5-pro", false)
+	path := UpstreamPath("/v1beta/models/public-gemini:generateContent", router.ProtocolGemini, "models/gemini-2.5-pro", false)
 	if path != "/v1beta/models/gemini-2.5-pro:generateContent" {
 		t.Fatalf("path = %s", path)
 	}

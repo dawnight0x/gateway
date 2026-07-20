@@ -235,6 +235,46 @@ func TestClassifyClientCancellationIsNotRetryable(t *testing.T) {
 	}
 }
 
+func TestClassifyStructuredAndLocalizedModelErrors(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		status  int
+		message string
+	}{
+		{name: "underscored code", status: http.StatusBadRequest, message: `{"error":{"code":"model_not_found"}}`},
+		{name: "hyphenated code", status: http.StatusNotFound, message: `{"type":"unsupported-model"}`},
+		{name: "Chinese unavailable", status: http.StatusBadRequest, message: `当前分组下模型 gpt-test 无可用渠道`},
+		{name: "Chinese permission", status: http.StatusForbidden, message: `没有模型权限`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := Classify(test.status, test.message); got != "model_unavailable" {
+				t.Fatalf("classification = %q", got)
+			}
+		})
+	}
+	if got := Classify(http.StatusBadRequest, `{"error":{"message":"invalid temperature for model input"}}`); got != "client_error" {
+		t.Fatalf("ordinary model parameter error classification = %q", got)
+	}
+}
+
+func TestProviderModelUnavailableDistinguishesAbsenceFromEntitlement(t *testing.T) {
+	for _, test := range []struct {
+		status  int
+		message string
+		want    bool
+	}{
+		{status: http.StatusNotFound, message: `{"error":{"code":"model_not_found"}}`, want: true},
+		{status: http.StatusBadRequest, message: `unsupported-model`, want: true},
+		{status: http.StatusBadRequest, message: `模型不存在`, want: true},
+		{status: http.StatusForbidden, message: `no access to model gpt-x`, want: false},
+		{status: http.StatusForbidden, message: `没有模型权限`, want: false},
+	} {
+		if got := ProviderModelUnavailable(test.status, test.message); got != test.want {
+			t.Fatalf("status=%d message=%q got=%v want=%v", test.status, test.message, got, test.want)
+		}
+	}
+}
+
 func findRouterTestKey(keys []model.Key, id string) *model.Key {
 	for i := range keys {
 		if keys[i].ID == id {
@@ -403,6 +443,65 @@ func TestModelRouteCandidatesPreferModelBeforeProviderPriority(t *testing.T) {
 	}
 }
 
+func TestRouteCandidatesSortsIndependentlyOfInputOrder(t *testing.T) {
+	keys := []model.Key{
+		{ID: "low-key", ProviderID: "low", ProviderType: model.ProviderOpenAICompatible, ProviderPriority: 1, ProviderEnabled: true, Priority: 100, Enabled: true},
+		{ID: "high-key", ProviderID: "high", ProviderType: model.ProviderOpenAICompatible, ProviderPriority: 100, ProviderEnabled: true, Priority: 1, Enabled: true},
+	}
+	route := model.ModelRoute{
+		ID: "logical", Enabled: true,
+		Models: []model.ModelRouteModel{
+			{Name: "fallback", Priority: 10, Enabled: true, Targets: []model.ModelRouteTarget{{ProviderID: "high", UpstreamModel: "high-fallback", Enabled: true}}},
+			{Name: "primary", Priority: 100, Enabled: true, Targets: []model.ModelRouteTarget{
+				{ProviderID: "low", UpstreamModel: "low-primary", Enabled: true},
+				{ProviderID: "high", UpstreamModel: "high-primary", Enabled: true},
+			}},
+		},
+	}
+
+	items := routeCandidates(keys, route, nil, ProtocolOpenAI)
+	want := []string{"high:high-primary", "low:low-primary", "high:high-fallback"}
+	if len(items) != len(want) {
+		t.Fatalf("candidates = %#v", items)
+	}
+	for index, expected := range want {
+		if got := items[index].ProviderID + ":" + items[index].UpstreamModel; got != expected {
+			t.Fatalf("candidate %d = %s, want %s", index, got, expected)
+		}
+	}
+}
+
+func TestProviderModelAllowlistFiltersDirectAndLogicalRoutes(t *testing.T) {
+	ctx := context.Background()
+	st := testStore(t)
+	_, _ = st.UpsertProvider(ctx, model.Provider{
+		ID: "provider", Name: "provider", Type: model.ProviderOpenAICompatible, BaseURL: "http://provider", Enabled: true,
+		ModelAllowlistEnabled: true, ModelAllowlist: []string{"allowed"},
+	})
+	_, _ = st.UpsertKey(ctx, model.Key{ID: "key", ProviderID: "provider", Name: "key", Secret: "secret", Enabled: true})
+	rt := New(st, config.Default().Routing)
+
+	items, err := rt.Candidates(ctx, "allowed", ProtocolOpenAI)
+	if err != nil || len(items) != 1 {
+		t.Fatalf("allowed direct candidates = %#v, err = %v", items, err)
+	}
+	items, err = rt.Candidates(ctx, "blocked", ProtocolOpenAI)
+	if err != nil || len(items) != 0 {
+		t.Fatalf("blocked direct candidates = %#v, err = %v", items, err)
+	}
+	_, err = st.UpsertModelRoute(ctx, model.ModelRoute{
+		ID: "logical", Name: "logical", Enabled: true,
+		Models: []model.ModelRouteModel{{Name: "blocked", Priority: 100, Enabled: true, Targets: []model.ModelRouteTarget{{ProviderID: "provider", UpstreamModel: "blocked", Enabled: true}}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	items, err = New(st, config.Default().Routing).Candidates(ctx, "logical", ProtocolOpenAI)
+	if err != nil || len(items) != 0 {
+		t.Fatalf("blocked logical candidates = %#v, err = %v", items, err)
+	}
+}
+
 func TestModelUnavailableCoolsOnlyProviderModelPair(t *testing.T) {
 	ctx := context.Background()
 	st := testStore(t)
@@ -449,5 +548,39 @@ func TestModelUnavailableCoolsOnlyProviderModelPair(t *testing.T) {
 	highKey := findRouterTestKey(keys, "high-key")
 	if highKey == nil || highKey.ConsecutiveFailures != 0 || highKey.CooldownUntil != nil {
 		t.Fatalf("high key health changed after model error: %#v", highKey)
+	}
+}
+
+func TestModelUnavailableCoolsOnlyFailingKeyModelPair(t *testing.T) {
+	ctx := context.Background()
+	st := testStore(t)
+	_, _ = st.UpsertProvider(ctx, model.Provider{ID: "provider", Name: "provider", Type: model.ProviderOpenAICompatible, BaseURL: "http://provider", Priority: 100, Enabled: true})
+	_, _ = st.UpsertKey(ctx, model.Key{ID: "key-a", ProviderID: "provider", Name: "a", Secret: "a", Priority: 100, Enabled: true})
+	_, _ = st.UpsertKey(ctx, model.Key{ID: "key-b", ProviderID: "provider", Name: "b", Secret: "b", Priority: 10, Enabled: true})
+	_, err := st.UpsertModelRoute(ctx, model.ModelRoute{
+		ID: "logical", Name: "logical", Enabled: true,
+		Models: []model.ModelRouteModel{{
+			Name: "primary", Priority: 100, Enabled: true,
+			Targets: []model.ModelRouteTarget{{ProviderID: "provider", UpstreamModel: "shared-model", Enabled: true}},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rt := New(st, config.Default().Routing)
+	items, err := rt.Candidates(ctx, "logical", ProtocolOpenAI)
+	if err != nil || len(items) != 2 {
+		t.Fatalf("initial candidates = %#v, err = %v", items, err)
+	}
+	if err := rt.RecordCandidateFailure(ctx, items[0], Failure{Status: http.StatusNotFound, ErrorType: "model_unavailable", Message: "model not found"}); err != nil {
+		t.Fatal(err)
+	}
+	items, err = rt.Candidates(ctx, "logical", ProtocolOpenAI)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].ID != "key-b" {
+		t.Fatalf("candidates after key-specific model cooldown = %#v", items)
 	}
 }

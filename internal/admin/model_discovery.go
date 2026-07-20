@@ -3,11 +3,10 @@ package admin
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"log/slog"
 	"strings"
 	"time"
-
-	"local-ai-gateway/internal/model"
 )
 
 const modelDiscoveryStartupDelay = 2 * time.Second
@@ -138,26 +137,74 @@ func (s *Service) refreshProviderModels(ctx context.Context, providerID string) 
 		_ = s.store.RecordProviderModelDiscoveryFailure(ctx, providerID, result.Status, result.Error)
 		return result
 	}
-	var selected *model.Key
+	foundKey := false
+	var successful *keyTestResult
+	failures := make([]string, 0)
 	for i := range keys {
-		if keys[i].ProviderID == providerID && keys[i].ProviderEnabled && keys[i].Enabled {
-			selected = &keys[i]
-			break
+		key := keys[i]
+		if key.ProviderID != providerID || !key.ProviderEnabled || !key.Enabled {
+			continue
+		}
+		foundKey = true
+		keySucceeded := false
+		var keyFailure keyTestResult
+		for _, path := range testPathsForKey(key) {
+			attempt := s.discoverModelsAtPath(ctx, key, path)
+			if attempt.Status == "ok" {
+				keySucceeded = true
+				if successful == nil {
+					copy := attempt
+					successful = &copy
+				}
+				break
+			}
+			result = attempt
+			keyFailure = attempt
+			if attempt.Status != "not_found" {
+				break
+			}
+		}
+		if !keySucceeded {
+			failures = append(failures, fmt.Sprintf("%s (%s): %s", key.ID, keyFailure.Status, keyFailure.Error))
 		}
 	}
-	if selected == nil {
-		_ = s.store.RecordProviderModelDiscoveryFailure(ctx, providerID, result.Status, result.Error)
+	if successful != nil {
+		inventories, err := s.store.ListProviderModels(ctx)
+		if err != nil {
+			result = *successful
+			result.Status = "storage_error"
+			result.Error = "discovered models but failed to load the provider inventory"
+			_ = s.store.RecordProviderModelDiscoveryFailure(ctx, providerID, result.Status, result.Error)
+			return result
+		}
+		models := inventories[providerID]
+		count := len(models)
+		result = *successful
+		result.Status = "ok"
+		result.Error = ""
+		result.ConnectionStatus = "ok"
+		result.Models = trimModelList(models, 300)
+		result.ModelCount = &count
+		var recordErr error
+		if len(failures) > 0 {
+			result.Status = "partial"
+			result.Error = strings.Join(failures, "; ")
+			if len(result.Error) > 2048 {
+				result.Error = result.Error[:2048]
+			}
+			recordErr = s.store.RecordProviderModelDiscoveryPartial(ctx, providerID, count, result.Error)
+		} else {
+			recordErr = s.store.RecordProviderModelDiscoverySuccess(ctx, providerID, count)
+		}
+		if recordErr != nil {
+			result.Status = "storage_error"
+			result.Error = "discovered models but failed to save the provider discovery state"
+		}
 		return result
 	}
-	for _, path := range testPathsForKey(*selected) {
-		attempt := s.discoverModelsAtPath(ctx, *selected, path)
-		if attempt.Status == "ok" {
-			return attempt
-		}
-		result = attempt
-		if attempt.Status != "not_found" {
-			break
-		}
+	if !foundKey {
+		_ = s.store.RecordProviderModelDiscoveryFailure(ctx, providerID, result.Status, result.Error)
+		return result
 	}
 	if result.Status == "" {
 		result.Status = "not_found"

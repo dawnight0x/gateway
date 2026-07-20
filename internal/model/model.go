@@ -1,6 +1,9 @@
 package model
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 const (
 	ProviderOpenAICompatible    = "openai-compatible"
@@ -11,47 +14,59 @@ const (
 	ProviderCustom              = "custom"
 )
 
+func NormalizeModelID(providerType, modelID string) string {
+	modelID = strings.TrimSpace(modelID)
+	if providerType == ProviderGeminiCompatible {
+		modelID = strings.TrimPrefix(modelID, "models/")
+	}
+	return strings.TrimSpace(modelID)
+}
+
 type Provider struct {
-	ID          string            `json:"id"`
-	Name        string            `json:"name"`
-	Type        string            `json:"type"`
-	BaseURL     string            `json:"baseUrl"`
-	Priority    int               `json:"priority"`
-	Enabled     bool              `json:"enabled"`
-	ModelMap    map[string]string `json:"modelMap"`
-	BalancePath string            `json:"balancePath"`
-	CreatedAt   time.Time         `json:"createdAt"`
-	UpdatedAt   time.Time         `json:"updatedAt"`
+	ID                    string            `json:"id"`
+	Name                  string            `json:"name"`
+	Type                  string            `json:"type"`
+	BaseURL               string            `json:"baseUrl"`
+	Priority              int               `json:"priority"`
+	Enabled               bool              `json:"enabled"`
+	ModelMap              map[string]string `json:"modelMap"`
+	ModelAllowlistEnabled bool              `json:"modelAllowlistEnabled"`
+	ModelAllowlist        []string          `json:"modelAllowlist"`
+	BalancePath           string            `json:"balancePath"`
+	CreatedAt             time.Time         `json:"createdAt"`
+	UpdatedAt             time.Time         `json:"updatedAt"`
 }
 
 type Key struct {
-	ID                  string            `json:"id"`
-	ProviderID          string            `json:"providerId"`
-	ProviderName        string            `json:"providerName"`
-	ProviderType        string            `json:"providerType"`
-	ProviderBaseURL     string            `json:"providerBaseUrl"`
-	ProviderPriority    int               `json:"providerPriority"`
-	ProviderEnabled     bool              `json:"providerEnabled"`
-	ProviderModelMap    map[string]string `json:"providerModelMap"`
-	ProviderBalancePath string            `json:"providerBalancePath"`
-	Name                string            `json:"name"`
-	Secret              string            `json:"-"`
-	KeyHint             string            `json:"keyHint"`
-	Priority            int               `json:"priority"`
-	Enabled             bool              `json:"enabled"`
-	ManualPreferred     bool              `json:"manualPreferred"`
-	ConsecutiveFailures int               `json:"consecutiveFailures"`
-	CooldownUntil       *time.Time        `json:"cooldownUntil,omitempty"`
-	LastError           string            `json:"lastError"`
-	LastStatusCode      *int              `json:"lastStatusCode,omitempty"`
-	SuccessCount        int               `json:"successCount"`
-	FailureCount        int               `json:"failureCount"`
-	LastUsedAt          *time.Time        `json:"lastUsedAt,omitempty"`
-	UpstreamModel       string            `json:"upstreamModel,omitempty"`
-	RouteID             string            `json:"routeId,omitempty"`
-	RouteModel          string            `json:"routeModel,omitempty"`
-	ModelPriority       int               `json:"modelPriority,omitempty"`
-	ModelCooldownUntil  *time.Time        `json:"modelCooldownUntil,omitempty"`
+	ID                            string            `json:"id"`
+	ProviderID                    string            `json:"providerId"`
+	ProviderName                  string            `json:"providerName"`
+	ProviderType                  string            `json:"providerType"`
+	ProviderBaseURL               string            `json:"providerBaseUrl"`
+	ProviderPriority              int               `json:"providerPriority"`
+	ProviderEnabled               bool              `json:"providerEnabled"`
+	ProviderModelMap              map[string]string `json:"providerModelMap"`
+	ProviderModelAllowlistEnabled bool              `json:"providerModelAllowlistEnabled"`
+	ProviderModelAllowlist        []string          `json:"providerModelAllowlist"`
+	ProviderBalancePath           string            `json:"providerBalancePath"`
+	Name                          string            `json:"name"`
+	Secret                        string            `json:"-"`
+	KeyHint                       string            `json:"keyHint"`
+	Priority                      int               `json:"priority"`
+	Enabled                       bool              `json:"enabled"`
+	ManualPreferred               bool              `json:"manualPreferred"`
+	ConsecutiveFailures           int               `json:"consecutiveFailures"`
+	CooldownUntil                 *time.Time        `json:"cooldownUntil,omitempty"`
+	LastError                     string            `json:"lastError"`
+	LastStatusCode                *int              `json:"lastStatusCode,omitempty"`
+	SuccessCount                  int               `json:"successCount"`
+	FailureCount                  int               `json:"failureCount"`
+	LastUsedAt                    *time.Time        `json:"lastUsedAt,omitempty"`
+	UpstreamModel                 string            `json:"upstreamModel,omitempty"`
+	RouteID                       string            `json:"routeId,omitempty"`
+	RouteModel                    string            `json:"routeModel,omitempty"`
+	ModelPriority                 int               `json:"modelPriority,omitempty"`
+	ModelCooldownUntil            *time.Time        `json:"modelCooldownUntil,omitempty"`
 }
 
 type ProviderModelDiscovery struct {
@@ -65,6 +80,7 @@ type ProviderModelDiscovery struct {
 
 type ProviderModelState struct {
 	ProviderID          string     `json:"providerId"`
+	KeyID               string     `json:"keyId"`
 	ModelID             string     `json:"modelId"`
 	ConsecutiveFailures int        `json:"consecutiveFailures"`
 	CooldownUntil       *time.Time `json:"cooldownUntil,omitempty"`
@@ -73,6 +89,17 @@ type ProviderModelState struct {
 	SuccessCount        int        `json:"successCount"`
 	FailureCount        int        `json:"failureCount"`
 	LastUsedAt          *time.Time `json:"lastUsedAt,omitempty"`
+}
+
+type RequestAttempt struct {
+	Sequence         int    `json:"sequence"`
+	ProviderID       string `json:"providerId"`
+	KeyID            string `json:"keyId"`
+	UpstreamModel    string `json:"upstreamModel"`
+	UpstreamProtocol string `json:"upstreamProtocol"`
+	Status           int    `json:"status"`
+	LatencyMS        int64  `json:"latencyMs"`
+	ErrorType        string `json:"errorType,omitempty"`
 }
 
 type ModelRouteTarget struct {
@@ -110,22 +137,24 @@ type GatewayKey struct {
 }
 
 type RequestLog struct {
-	ID               int64     `json:"id"`
-	RequestID        string    `json:"requestId"`
-	InboundProtocol  string    `json:"inboundProtocol"`
-	ProviderID       string    `json:"providerId,omitempty"`
-	KeyID            string    `json:"keyId,omitempty"`
-	Model            string    `json:"model,omitempty"`
-	RouteID          string    `json:"routeId,omitempty"`
-	UpstreamModel    string    `json:"upstreamModel,omitempty"`
-	Attempts         int       `json:"attempts,omitempty"`
-	Status           int       `json:"status"`
-	LatencyMS        int64     `json:"latencyMs"`
-	PromptTokens     *int      `json:"promptTokens,omitempty"`
-	CompletionTokens *int      `json:"completionTokens,omitempty"`
-	TotalTokens      *int      `json:"totalTokens,omitempty"`
-	ErrorType        string    `json:"errorType,omitempty"`
-	CreatedAt        time.Time `json:"createdAt"`
+	ID               int64            `json:"id"`
+	RequestID        string           `json:"requestId"`
+	InboundProtocol  string           `json:"inboundProtocol"`
+	ProviderID       string           `json:"providerId,omitempty"`
+	KeyID            string           `json:"keyId,omitempty"`
+	Model            string           `json:"model,omitempty"`
+	RouteID          string           `json:"routeId,omitempty"`
+	UpstreamModel    string           `json:"upstreamModel,omitempty"`
+	Attempts         int              `json:"attempts,omitempty"`
+	AttemptTrace     []RequestAttempt `json:"attemptTrace,omitempty"`
+	TraceTruncated   bool             `json:"traceTruncated,omitempty"`
+	Status           int              `json:"status"`
+	LatencyMS        int64            `json:"latencyMs"`
+	PromptTokens     *int             `json:"promptTokens,omitempty"`
+	CompletionTokens *int             `json:"completionTokens,omitempty"`
+	TotalTokens      *int             `json:"totalTokens,omitempty"`
+	ErrorType        string           `json:"errorType,omitempty"`
+	CreatedAt        time.Time        `json:"createdAt"`
 }
 
 type Balance struct {

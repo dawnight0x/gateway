@@ -49,6 +49,9 @@ createApp({
     const modelRoutes = ref([]);
     const modelStates = ref([]);
     const refreshingProviderId = ref('');
+    const modelPolicySavingProviderId = ref('');
+    const modelPolicyDrafts = reactive({});
+    const modelPolicySearch = reactive({});
     const testingKeyId = ref('');
     const logs = ref([]);
     const logPage = reactive({ total: 0, limit: 50, offset: 0 });
@@ -223,6 +226,7 @@ createApp({
         balances.value = nextDashboard?.balances || [];
         logs.value = nextDashboard?.logs || [];
         providerModels.value = nextDashboard?.providerModels || {};
+        syncModelPolicyDrafts(providers.value);
         modelDiscovery.value = nextDashboard?.modelDiscovery || {};
         modelRoutes.value = nextDashboard?.modelRoutes || [];
         modelStates.value = nextDashboard?.modelStates || [];
@@ -324,6 +328,8 @@ createApp({
       balances.value = [];
       balanceResults.value = [];
       providerModels.value = {};
+      Object.keys(modelPolicyDrafts).forEach((providerId) => delete modelPolicyDrafts[providerId]);
+      Object.keys(modelPolicySearch).forEach((providerId) => delete modelPolicySearch[providerId]);
       modelDiscovery.value = {};
       modelRoutes.value = [];
       modelStates.value = [];
@@ -605,6 +611,115 @@ createApp({
 
     const providerModelPreview = (providerId) => providerDiscoveredModels(providerId).slice(0, 12);
 
+    const isFlagshipModel = (modelId) => {
+      const value = String(modelId || '').trim().toLowerCase();
+      if (!value) return false;
+      if (/(?:^|[/_.-])(embed(?:ding)?|rerank|moderation|guard|safety|tts|speech|whisper|transcri(?:be|ption)|ocr)(?:$|[/_.-])/.test(value)) return false;
+      return [
+        /(?:^|[/_.-])gpt[/_.-]?(?:5|4(?:[/_.-]?1|o)?)(?:$|[/_.-])/,
+        /(?:^|[/_.-])o(?:1|3|4)(?:$|[/_.-])/,
+        /claude.*(?:opus|sonnet)/,
+        /gemini.*(?:ultra|pro|flash)/,
+        /deepseek.*(?:v3|v4|r1|reasoner)/,
+        /(?:kimi|moonshot).*k(?:2|1[_.-]?5)/,
+        /qwen.*(?:max|plus|72b|110b)/,
+        /(?:^|[/_.-])glm[/_.-]?(?:4|5)/,
+        /minimax.*m(?:2|3)/,
+        /grok[/_.-]?(?:3|4)/,
+        /mistral.*(?:large|medium)/,
+        /llama.*(?:70b|405b)/,
+      ].some((pattern) => pattern.test(value));
+    };
+
+    const syncModelPolicyDrafts = (nextProviders) => {
+      const active = new Set();
+      (nextProviders || []).forEach((provider) => {
+        active.add(provider.id);
+        if (modelPolicyDrafts[provider.id]?.dirty) return;
+        const savedModels = [...new Set((provider.modelAllowlist || []).map((item) => String(item || '').trim()).filter(Boolean))];
+        modelPolicyDrafts[provider.id] = {
+          enabled: !!provider.modelAllowlistEnabled,
+          models: savedModels.length || provider.modelAllowlistEnabled
+            ? savedModels
+            : [...new Set((providerModels.value[provider.id] || []).map((item) => String(item || '').trim()).filter(Boolean))],
+          dirty: false,
+        };
+      });
+      Object.keys(modelPolicyDrafts).forEach((providerId) => {
+        if (!active.has(providerId)) delete modelPolicyDrafts[providerId];
+      });
+      Object.keys(modelPolicySearch).forEach((providerId) => {
+        if (!active.has(providerId)) delete modelPolicySearch[providerId];
+      });
+    };
+
+    const modelPolicyDraft = (providerId) => modelPolicyDrafts[providerId] || { enabled: false, models: [], dirty: false };
+
+    const providerModelPolicyOptions = (providerId) => {
+      const provider = providers.value.find((item) => item.id === providerId);
+      const selected = provider?.modelAllowlist || [];
+      return [...new Set([...providerDiscoveredModels(providerId), ...selected]
+        .map((item) => String(item || '').trim()).filter(Boolean))]
+        .sort((a, b) => a.localeCompare(b));
+    };
+
+    const filteredProviderModelPolicyOptions = (providerId) => {
+      const query = String(modelPolicySearch[providerId] || '').trim().toLowerCase();
+      const options = providerModelPolicyOptions(providerId);
+      return (query ? options.filter((item) => item.toLowerCase().includes(query)) : options).slice(0, 300);
+    };
+
+    const modelPolicySelected = (providerId, modelId) => modelPolicyDraft(providerId).models.includes(modelId);
+
+    const setModelPolicyEnabled = (providerId, enabled) => {
+      const draft = modelPolicyDrafts[providerId];
+      if (!draft) return;
+      draft.enabled = !!enabled;
+      draft.dirty = true;
+    };
+
+    const setProviderModelSelected = (providerId, modelId, selected) => {
+      const draft = modelPolicyDrafts[providerId];
+      if (!draft) return;
+      const next = new Set(draft.models);
+      if (selected) next.add(modelId);
+      else next.delete(modelId);
+      draft.models = [...next];
+      draft.dirty = true;
+    };
+
+    const selectProviderModels = (providerId, mode) => {
+      const draft = modelPolicyDrafts[providerId];
+      if (!draft) return;
+      const options = providerModelPolicyOptions(providerId);
+      if (mode === 'all') draft.models = options;
+      else if (mode === 'flagship') draft.models = options.filter(isFlagshipModel);
+      else draft.models = [];
+      draft.enabled = true;
+      draft.dirty = true;
+    };
+
+    const saveProviderModelPolicy = async (provider) => {
+      const draft = modelPolicyDrafts[provider?.id];
+      if (!provider?.id || !draft || modelPolicySavingProviderId.value) return;
+      modelPolicySavingProviderId.value = provider.id;
+      try {
+        await runAction(async () => {
+          await api(`providers/${provider.id}`, {
+            method: 'PATCH',
+            body: JSON.stringify({
+              modelAllowlistEnabled: !!draft.enabled,
+              modelAllowlist: [...draft.models],
+            }),
+          });
+          draft.dirty = false;
+          await refresh();
+        });
+      } finally {
+        modelPolicySavingProviderId.value = '';
+      }
+    };
+
     const discoveryForProvider = (providerId) => modelDiscovery.value[providerId] || {
       providerId,
       status: 'unknown',
@@ -621,6 +736,7 @@ createApp({
     const discoveryStatusText = (providerId) => {
       const status = discoveryForProvider(providerId).status;
       if (status === 'ok') return t('model.discovery.ok');
+      if (status === 'partial') return t('model.discovery.partial');
       if (status === 'unknown') return t('model.discovery.unknown');
       if (status === 'empty') return t('model.discovery.empty');
       return t('model.discovery.error');
@@ -715,7 +831,13 @@ createApp({
     };
 
     const addRouteTarget = (modelIndex) => {
-      modelRouteForm.models[modelIndex]?.targets.push(defaultRouteTarget());
+      const routeModel = modelRouteForm.models[modelIndex];
+      if (!routeModel) return;
+      const usedProviders = new Set(routeModel.targets.map((target) => target.providerId).filter(Boolean));
+      const providerId = providers.value.find((provider) => provider.enabled && !usedProviders.has(provider.id))?.id
+        || providers.value.find((provider) => !usedProviders.has(provider.id))?.id
+        || '';
+      routeModel.targets.push(providerId ? defaultRouteTarget(providerId) : { providerId: '', upstreamModel: '', enabled: true });
     };
 
     const removeRouteTarget = (modelIndex, targetIndex) => {
@@ -769,9 +891,33 @@ createApp({
       });
     };
 
-    const modelStateFor = (providerId, upstreamModel) => modelStates.value.find(
+    const routeProviderSelected = (modelIndex, targetIndex, providerId) => modelRouteForm.models[modelIndex]?.targets.some(
+      (target, index) => index !== targetIndex && target.providerId === providerId,
+    );
+
+    const modelStatesFor = (providerId, upstreamModel) => modelStates.value.filter(
       (item) => item.providerId === providerId && item.modelId === upstreamModel,
     );
+
+    const modelCoolingCount = (providerId, upstreamModel) => {
+      const now = Date.now();
+      return modelStatesFor(providerId, upstreamModel).filter((item) => {
+        const until = Date.parse(item.cooldownUntil || '');
+        return Number.isFinite(until) && until > now;
+      }).length;
+    };
+
+    const modelHasFailureState = (providerId, upstreamModel) => modelStatesFor(providerId, upstreamModel).some(
+      (item) => item.cooldownUntil || item.lastError || Number(item.consecutiveFailures || 0) > 0,
+    );
+
+    const resetModelState = async (providerId, upstreamModel) => runAction(async () => {
+      await api('model-states/reset', {
+        method: 'POST',
+        body: JSON.stringify({ providerId, modelId: upstreamModel }),
+      });
+      await refresh();
+    });
 
     const applyDefaultModelToMap = (modelMap, defaultModel) => {
       const next = { ...(modelMap || {}) };
@@ -1215,7 +1361,10 @@ createApp({
       modelRouteForm,
       modelRouteFormOpen,
       modelRoutes,
-      modelStateFor,
+      routeProviderSelected,
+      modelCoolingCount,
+      modelHasFailureState,
+      resetModelState,
       modelStates,
       openModelRouteForm,
       addRouteModel,
@@ -1227,6 +1376,18 @@ createApp({
       deleteModelRoute,
       providerModelPreview,
       providerDiscoveredModels,
+      providerModelPolicyOptions,
+      filteredProviderModelPolicyOptions,
+      modelPolicyDraft,
+      modelPolicyDrafts,
+      modelPolicySearch,
+      modelPolicySelected,
+      modelPolicySavingProviderId,
+      isFlagshipModel,
+      setModelPolicyEnabled,
+      setProviderModelSelected,
+      selectProviderModels,
+      saveProviderModelPolicy,
       discoveryForProvider,
       discoveryStatusClass,
       discoveryStatusText,

@@ -21,6 +21,7 @@ type streamOutput struct {
 	flusher      http.Flusher
 	controller   *http.ResponseController
 	writeTimeout time.Duration
+	beforeCommit func()
 }
 
 const (
@@ -37,6 +38,10 @@ func newStreamOutput(w http.ResponseWriter, status int, writeTimeout time.Durati
 func (o *streamOutput) commit() {
 	if o.committed {
 		return
+	}
+	if o.beforeCommit != nil {
+		o.beforeCommit()
+		o.beforeCommit = nil
 	}
 	h := o.w.Header()
 	h.Set("Content-Type", "text/event-stream; charset=utf-8")
@@ -68,8 +73,8 @@ func (o *streamOutput) write(data []byte) error {
 }
 
 func (s *Service) pipeStream(w http.ResponseWriter, resp *http.Response, key model.Key, inbound, upstream string) attemptResult {
-	forwardResponseMetadataHeaders(w.Header(), resp.Header)
 	output := newStreamOutput(w, resp.StatusCode, time.Duration(s.cfg.Routing.StreamWriteTimeoutSeconds)*time.Second)
+	output.beforeCommit = func() { forwardResponseMetadataHeaders(w.Header(), resp.Header) }
 	if !s.cfg.Routing.StreamRetryBeforeFirstByte {
 		output.commit()
 	}
@@ -83,6 +88,7 @@ func (s *Service) pipeStream(w http.ResponseWriter, resp *http.Response, key mod
 	var dataLines []string
 	dataBytes := 0
 	recordedResources := 0
+	processedEvents := 0
 	processEvent := func() error {
 		if len(dataLines) == 0 {
 			event = ""
@@ -90,6 +96,7 @@ func (s *Service) pipeStream(w http.ResponseWriter, resp *http.Response, key mod
 			return nil
 		}
 		data := []byte(strings.Join(dataLines, "\n"))
+		processedEvents++
 		frames, err := protocol.ConvertStreamEvent(event, data, inbound, upstream, state)
 		event = ""
 		dataLines = dataLines[:0]
@@ -153,8 +160,11 @@ func (s *Service) pipeStream(w http.ResponseWriter, resp *http.Response, key mod
 			return streamFailure(output, resp.StatusCode, state.Usage, err, s.cfg.Routing.StreamRetryBeforeFirstByte)
 		}
 	}
-	if !output.committed {
-		return attemptResult{status: http.StatusBadGateway, errorType: "empty_response", message: "empty upstream stream", retryable: true, ambiguous: true}
+	if processedEvents == 0 {
+		if !output.committed {
+			return attemptResult{status: http.StatusBadGateway, errorType: "empty_response", message: "empty upstream stream", retryable: true, ambiguous: true}
+		}
+		return attemptResult{committed: true, status: resp.StatusCode, errorType: "empty_response", message: "empty upstream stream", ambiguous: true}
 	}
 	if inbound != upstream && !state.Finished {
 		frames, err := protocol.ConvertStreamEvent("", []byte("[DONE]"), inbound, upstream, state)

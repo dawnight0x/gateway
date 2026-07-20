@@ -50,25 +50,27 @@ type Service struct {
 }
 
 const (
-	maxProxyRequestBody  = 16 << 20
-	maxProxyResponseBody = 64 << 20
-	maxStreamAggregate   = 64 << 20
-	maxModelNameLength   = 512
-	statusClientClosed   = 499
+	maxProxyRequestBody    = 16 << 20
+	maxProxyResponseBody   = 64 << 20
+	maxStreamAggregate     = 64 << 20
+	maxModelNameLength     = 512
+	maxRequestAttemptTrace = 256
+	statusClientClosed     = 499
 )
 
 type attemptResult struct {
-	ok                  bool
-	committed           bool
-	status              int
-	errorType           string
-	message             string
-	retryable           bool
-	retryAfterSeconds   int
-	usage               protocol.Usage
-	endpointUnsupported bool
-	ambiguous           bool
-	responseResourceIDs []string
+	ok                       bool
+	committed                bool
+	status                   int
+	errorType                string
+	message                  string
+	retryable                bool
+	retryAfterSeconds        int
+	usage                    protocol.Usage
+	endpointUnsupported      bool
+	providerModelUnavailable bool
+	ambiguous                bool
+	responseResourceIDs      []string
 }
 
 func New(st *store.Store, rt *router.Router, cfg config.Config) *Service {
@@ -222,6 +224,14 @@ func (s *Service) proxy(w http.ResponseWriter, r *http.Request) {
 	}
 
 	maxAttempts := s.cfg.Routing.RetryPerRequest
+	explicitRoute := len(candidates) > 0 && candidates[0].RouteID != ""
+	if explicitRoute {
+		// Explicit routes promise to exhaust higher-priority model targets before
+		// falling back. Definitive failures remain non-billable; ambiguous retries
+		// are still guarded by RetryAmbiguousErrors below.
+		maxAttempts = len(candidates)
+	}
+	fallbackOnBusy := !explicitRoute || s.cfg.Routing.FallbackOnBusy
 	if statefulRequest {
 		maxAttempts = 1
 		if len(candidates) > 1 {
@@ -251,6 +261,8 @@ func (s *Service) proxy(w http.ResponseWriter, r *http.Request) {
 	busy := false
 	var last attemptResult
 	var lastKey model.Key
+	attemptTrace := make([]model.RequestAttempt, 0, min(maxAttempts, maxRequestAttemptTrace))
+	traceTruncated := false
 	remaining := append([]model.Key(nil), candidates...)
 	for len(remaining) > 0 && attempted < maxAttempts {
 		// Capture the change signal before the acquisition sweep so a release racing
@@ -258,11 +270,19 @@ func (s *Service) proxy(w http.ResponseWriter, r *http.Request) {
 		signal := s.limits.changeSignal()
 		selected := -1
 		var releaseCapacity func()
-		for index, candidate := range remaining {
+		if fallbackOnBusy {
+			for index, candidate := range remaining {
+				if release, ok := s.limits.tryAcquire(candidate.ProviderID, candidate.ID); ok {
+					selected = index
+					releaseCapacity = release
+					break
+				}
+			}
+		} else {
+			candidate := remaining[0]
 			if release, ok := s.limits.tryAcquire(candidate.ProviderID, candidate.ID); ok {
-				selected = index
+				selected = 0
 				releaseCapacity = release
-				break
 			}
 		}
 		if selected < 0 {
@@ -273,21 +293,25 @@ func (s *Service) proxy(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		key := remaining[selected]
-		remaining = append(remaining[:selected], remaining[selected+1:]...)
 		releaseProbe, probeOK := s.router.AcquireRecoveryProbe(key)
 		if !probeOK {
 			releaseCapacity()
 			busy = true
+			if !fallbackOnBusy {
+				break
+			}
+			remaining = append(remaining[:selected], remaining[selected+1:]...)
 			continue
 		}
+		remaining = append(remaining[:selected], remaining[selected+1:]...)
 		attempted++
 		lastKey = key
-		result, done := s.attemptKey(w, r, key, pr, requestID, start, attempted, releaseCapacity, releaseProbe)
+		result, done := s.attemptKey(w, r, key, pr, requestID, start, attempted, releaseCapacity, releaseProbe, &attemptTrace, &traceTruncated)
 		if done {
 			return
 		}
 		last = result
-		remaining = candidatesAfterFailure(remaining, key, result.errorType)
+		remaining = candidatesAfterFailure(remaining, key, result)
 		if !result.retryable || (result.ambiguous && !s.cfg.Routing.RetryAmbiguousErrors) {
 			break
 		}
@@ -303,13 +327,13 @@ func (s *Service) proxy(w http.ResponseWriter, r *http.Request) {
 	if status < 400 {
 		status = http.StatusBadGateway
 	}
-	s.logCandidate(r.Context(), requestID, inbound, lastKey, modelName, status, start, last.usage, last.errorType, attempted)
+	s.logCandidate(r.Context(), requestID, inbound, lastKey, modelName, status, start, last.usage, last.errorType, attempted, attemptTrace, traceTruncated)
 	writeJSON(w, status, map[string]any{"error": map[string]any{"message": last.message, "type": last.errorType}})
 }
 
-func candidatesAfterFailure(candidates []model.Key, failed model.Key, errorType string) []model.Key {
-	keyUnavailable := router.CountsAgainstKeyHealth(errorType)
-	modelUnavailable := router.CountsAgainstModelHealth(errorType)
+func candidatesAfterFailure(candidates []model.Key, failed model.Key, result attemptResult) []model.Key {
+	keyUnavailable := router.CountsAgainstKeyHealth(result.errorType)
+	modelUnavailable := router.CountsAgainstModelHealth(result.errorType)
 	if !keyUnavailable && !modelUnavailable {
 		return candidates
 	}
@@ -318,8 +342,13 @@ func candidatesAfterFailure(candidates []model.Key, failed model.Key, errorType 
 		if keyUnavailable && candidate.ID == failed.ID {
 			continue
 		}
-		if modelUnavailable && candidate.ProviderID == failed.ProviderID && candidate.UpstreamModel == failed.UpstreamModel {
-			continue
+		if modelUnavailable && candidate.UpstreamModel == failed.UpstreamModel {
+			if result.providerModelUnavailable && candidate.ProviderID == failed.ProviderID {
+				continue
+			}
+			if candidate.ID == failed.ID {
+				continue
+			}
 		}
 		filtered = append(filtered, candidate)
 	}
@@ -341,7 +370,7 @@ type proxyRequest struct {
 // optional OpenAI fallback. It always releases the acquired capacity slot, recovery probe, and
 // in-flight counter before returning. The bool return reports whether the request is fully handled
 // (response written); when false the caller may retry with the next candidate.
-func (s *Service) attemptKey(w http.ResponseWriter, r *http.Request, key model.Key, pr proxyRequest, requestID string, start time.Time, attempted int, releaseCapacity, releaseProbe func()) (attemptResult, bool) {
+func (s *Service) attemptKey(w http.ResponseWriter, r *http.Request, key model.Key, pr proxyRequest, requestID string, start time.Time, attempted int, releaseCapacity, releaseProbe func(), attemptTrace *[]model.RequestAttempt, traceTruncated *bool) (attemptResult, bool) {
 	s.inFlight.Add(1)
 	defer func() {
 		s.inFlight.Add(-1)
@@ -363,6 +392,7 @@ func (s *Service) attemptKey(w http.ResponseWriter, r *http.Request, key model.K
 
 	var result attemptResult
 	for protocolIndex, upstream := range protocols {
+		attemptStart := time.Now()
 		if protocolIndex > 0 {
 			s.upstreamAttempts.Add(1)
 			s.retryAttempts.Add(1)
@@ -370,12 +400,14 @@ func (s *Service) attemptKey(w http.ResponseWriter, r *http.Request, key model.K
 		converted, convertErr := protocol.ConvertRequest(pr.body, pr.inbound, upstream, key.UpstreamModel, pr.pathModel)
 		if convertErr != nil {
 			result = attemptResult{status: http.StatusBadRequest, errorType: "protocol_error", message: convertErr.Error()}
+			appendRequestAttempt(attemptTrace, traceTruncated, key, upstream, result, attemptStart)
 			break
 		}
 		if pr.requestedStream {
 			converted, convertErr = protocol.EnableStreaming(converted, upstream)
 			if convertErr != nil {
 				result = attemptResult{status: http.StatusBadRequest, errorType: "protocol_error", message: convertErr.Error()}
+				appendRequestAttempt(attemptTrace, traceTruncated, key, upstream, result, attemptStart)
 				break
 			}
 		}
@@ -387,6 +419,7 @@ func (s *Service) attemptKey(w http.ResponseWriter, r *http.Request, key model.K
 		if !result.ok && r.Context().Err() != nil {
 			result = clientCanceledResult(result)
 		}
+		appendRequestAttempt(attemptTrace, traceTruncated, key, upstream, result, attemptStart)
 		if result.ok {
 			if pr.inbound == router.ProtocolOpenAIResponses {
 				ids := append(append([]string(nil), pr.resourceRefs...), result.responseResourceIDs...)
@@ -397,7 +430,7 @@ func (s *Service) attemptKey(w http.ResponseWriter, r *http.Request, key model.K
 			if err := s.router.RecordCandidateSuccess(r.Context(), key); err != nil {
 				slog.Warn("record upstream success failed", "key_id", key.ID, "error", err)
 			}
-			s.logCandidate(r.Context(), requestID, pr.inbound, key, pr.modelName, result.status, start, result.usage, "", attempted)
+			s.logCandidate(r.Context(), requestID, pr.inbound, key, pr.modelName, result.status, start, result.usage, "", attempted, *attemptTrace, *traceTruncated)
 			return result, true
 		}
 		if protocolIndex == 0 && result.endpointUnsupported && len(protocols) > 1 {
@@ -417,7 +450,7 @@ func (s *Service) attemptKey(w http.ResponseWriter, r *http.Request, key model.K
 		}
 	}
 	if result.committed {
-		s.logCandidate(r.Context(), requestID, pr.inbound, key, pr.modelName, result.status, start, result.usage, result.errorType, attempted)
+		s.logCandidate(r.Context(), requestID, pr.inbound, key, pr.modelName, result.status, start, result.usage, result.errorType, attempted, *attemptTrace, *traceTruncated)
 		return result, true
 	}
 	return result, false
@@ -452,7 +485,7 @@ func (s *Service) forward(w http.ResponseWriter, r *http.Request, target string,
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		errType := router.Classify(resp.StatusCode, string(body))
 		unsupported := errType != "model_unavailable" && isUnsupportedOpenAIEndpoint(resp.StatusCode, body)
-		return attemptResult{status: resp.StatusCode, errorType: errType, message: sanitizeUpstreamMessage(errorMessage(body, resp.Status), key.Secret), retryable: unsupported || router.Retryable(errType), retryAfterSeconds: retryAfter(resp.Header.Get("Retry-After")), endpointUnsupported: unsupported, ambiguous: resp.StatusCode >= 500}
+		return attemptResult{status: resp.StatusCode, errorType: errType, message: sanitizeUpstreamMessage(errorMessage(body, resp.Status), key.Secret), retryable: unsupported || router.Retryable(errType), retryAfterSeconds: retryAfter(resp.Header.Get("Retry-After")), endpointUnsupported: unsupported, providerModelUnavailable: router.ProviderModelUnavailable(resp.StatusCode, string(body)), ambiguous: resp.StatusCode >= 500}
 	}
 
 	contentType := resp.Header.Get("Content-Type")
@@ -648,25 +681,40 @@ func (s *Service) models(w http.ResponseWriter, r *http.Request) {
 		writeProxyStoreError(w, "load model routes", err)
 		return
 	}
+	keys, err := s.store.ListKeys(r.Context())
+	if err != nil {
+		writeProxyStoreError(w, "load upstream keys", err)
+		return
+	}
+	usableProviders := make(map[string]bool)
+	providersByID := make(map[string]model.Provider, len(providers))
+	for _, provider := range providers {
+		providersByID[provider.ID] = provider
+	}
+	for _, key := range keys {
+		if key.Enabled && key.ProviderEnabled {
+			usableProviders[key.ProviderID] = true
+		}
+	}
 	set := make(map[string]bool)
 	for _, route := range routes {
-		if route.Enabled && strings.TrimSpace(route.ID) != "" {
+		if route.Enabled && strings.TrimSpace(route.ID) != "" && routeHasUsableTarget(route, usableProviders, providersByID) {
 			set[route.ID] = true
 		}
 	}
 	for _, p := range providers {
-		if !p.Enabled {
+		if !p.Enabled || !usableProviders[p.ID] {
 			continue
 		}
-		for public := range p.ModelMap {
+		for public, upstream := range p.ModelMap {
 			public = strings.TrimSpace(public)
-			if public != "" && public != "*" && public != "default" {
+			if public != "" && public != "*" && public != "default" && router.ProviderAllowsModel(p.Type, p.ModelAllowlistEnabled, p.ModelAllowlist, upstream) {
 				set[public] = true
 			}
 		}
 		if len(p.ModelMap) == 0 {
 			for _, modelID := range discovered[p.ID] {
-				if modelID = strings.TrimSpace(modelID); modelID != "" {
+				if modelID = strings.TrimSpace(modelID); modelID != "" && router.ProviderAllowsModel(p.Type, p.ModelAllowlistEnabled, p.ModelAllowlist, modelID) {
 					set[modelID] = true
 				}
 			}
@@ -680,8 +728,9 @@ func (s *Service) models(w http.ResponseWriter, r *http.Request) {
 	if strings.HasPrefix(r.URL.Path, "/v1beta/") || (r.URL.Path == "/v1/models" && r.Header.Get("x-goog-api-key") != "") {
 		data := make([]map[string]any, 0, len(ids))
 		for _, id := range ids {
+			geminiID := model.NormalizeModelID(model.ProviderGeminiCompatible, id)
 			data = append(data, map[string]any{
-				"name":                       "models/" + id,
+				"name":                       "models/" + geminiID,
 				"displayName":                id,
 				"supportedGenerationMethods": []string{"generateContent", "streamGenerateContent"},
 			})
@@ -694,6 +743,21 @@ func (s *Service) models(w http.ResponseWriter, r *http.Request) {
 		data = append(data, map[string]any{"id": id, "object": "model", "owned_by": "local-gateway"})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"object": "list", "data": data})
+}
+
+func routeHasUsableTarget(route model.ModelRoute, usableProviders map[string]bool, providers map[string]model.Provider) bool {
+	for _, routeModel := range route.Models {
+		if !routeModel.Enabled {
+			continue
+		}
+		for _, target := range routeModel.Targets {
+			provider, exists := providers[target.ProviderID]
+			if target.Enabled && usableProviders[target.ProviderID] && exists && router.ProviderAllowsModel(provider.Type, provider.ModelAllowlistEnabled, provider.ModelAllowlist, target.UpstreamModel) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (s *Service) authorized(r *http.Request) bool {
@@ -732,12 +796,30 @@ func (s *Service) log(ctx context.Context, requestID, inbound, providerID, keyID
 	})
 }
 
-func (s *Service) logCandidate(ctx context.Context, requestID, inbound string, key model.Key, modelName string, status int, start time.Time, usage protocol.Usage, errType string, attempts int) {
+func (s *Service) logCandidate(ctx context.Context, requestID, inbound string, key model.Key, modelName string, status int, start time.Time, usage protocol.Usage, errType string, attempts int, attemptTrace []model.RequestAttempt, traceTruncated bool) {
 	s.recordRequestLog(ctx, model.RequestLog{
 		RequestID: requestID, InboundProtocol: inbound, ProviderID: key.ProviderID, KeyID: key.ID,
 		Model: modelName, RouteID: key.RouteID, UpstreamModel: key.UpstreamModel, Attempts: attempts,
+		AttemptTrace: append([]model.RequestAttempt(nil), attemptTrace...), TraceTruncated: traceTruncated,
 		Status: status, LatencyMS: time.Since(start).Milliseconds(), PromptTokens: usage.PromptTokens,
 		CompletionTokens: usage.CompletionTokens, TotalTokens: usage.TotalTokens, ErrorType: errType,
+	})
+}
+
+func appendRequestAttempt(trace *[]model.RequestAttempt, truncated *bool, key model.Key, upstream string, result attemptResult, start time.Time) {
+	if len(*trace) >= maxRequestAttemptTrace {
+		*truncated = true
+		return
+	}
+	*trace = append(*trace, model.RequestAttempt{
+		Sequence:         len(*trace) + 1,
+		ProviderID:       key.ProviderID,
+		KeyID:            key.ID,
+		UpstreamModel:    key.UpstreamModel,
+		UpstreamProtocol: upstream,
+		Status:           result.status,
+		LatencyMS:        time.Since(start).Milliseconds(),
+		ErrorType:        result.errorType,
 	})
 }
 

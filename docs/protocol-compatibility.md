@@ -2,14 +2,14 @@
 
 网关优先使用入站协议对应的上游原生端点。只有 Provider 类型或端点能力不一致时才执行转换。转换目标是保留明确支持的语义，而不是把未知字段静默删除。
 
-启用的逻辑模型路由会先把客户端模型 ID 展开为按优先级排列的实际上游模型和 Provider。转换发生在候选确定之后，因此每次原生请求或协议转换都会使用该候选配置的实际上游模型名。未匹配逻辑路由的请求继续使用 Provider 的 `model_map`；没有映射时保持客户端模型名。
+启用的逻辑模型路由会先把客户端模型 ID 展开为按优先级排列的实际上游模型和 Provider。转换发生在候选确定之后，因此每次原生请求或协议转换都会使用该候选配置的实际上游模型名。Provider 开启模型白名单后，白名单会同时约束逻辑路由目标、未匹配逻辑路由的 `model_map` 结果和 `/v1/models` 输出；没有映射时保持客户端模型名。
 
 | 入站协议 | 同协议上游 | OpenAI Chat / Responses 互转 | Anthropic / Gemini / OpenAI 跨协议 |
 |---|---|---|---|
 | OpenAI Chat Completions | 原样转发并替换模型名 | 文本、流式、工具调用与结果、多模态内容、JSON Schema、reasoning、usage | 基础文本、system、temperature、top_p、stop；工具和多模态会明确拒绝 |
 | OpenAI Responses | 原生 `/v1/responses` | 文本、流式、函数工具、多模态图片/文件、JSON Schema、reasoning、usage；有状态字段不转换 | 先转换为 Chat 语义；超出基础文本能力的字段会明确拒绝 |
 | Anthropic Messages | 原样转发并替换模型名 | 不适用 | 基础文本、system、max_tokens、temperature、top_p、stop_sequences；工具、thinking 与非文本内容会明确拒绝 |
-| Gemini generateContent | 原样转发，模型放在 URL | 不适用 | 基础文本、systemInstruction、generationConfig 的常用采样参数；tools、safetySettings、cachedContent 与非文本 parts 会明确拒绝 |
+| Gemini generateContent | 原样转发，模型放在 URL；自动规范化官方列表中的 `models/` 前缀 | 不适用 | 基础文本、systemInstruction、generationConfig 的常用采样参数；tools、safetySettings、cachedContent 与非文本 parts 会明确拒绝 |
 
 ## 流式边界
 
@@ -30,4 +30,4 @@
 
 发现不支持的跨协议字段时，请求在调用转换端点之前返回 `400 protocol_error`。上游返回无法解析或结构错误的 2xx JSON 时返回 `502 protocol_error`，该 Key 不会被标记为成功。需要完整语义时，应配置同协议 Provider 或让客户端使用上游原生协议。
 
-上游明确返回模型不存在、未启用或无模型权限时归类为 `model_unavailable`，不会误判成端点不支持并触发 Chat/Responses 双端点重试。该错误只影响对应 Provider/模型组合，网关会先尝试同模型的其他 Provider，再进入下一备用模型。
+上游明确返回模型不存在、未启用或无模型权限时归类为 `model_unavailable`，兼容常见结构化错误码、下划线/连字符和中英文消息，不会误判成端点不支持并触发 Chat/Responses 双端点重试。该错误只影响对应 Provider/Key/模型组合，网关会先尝试同模型的其他 Key 和 Provider，再进入下一备用模型。
