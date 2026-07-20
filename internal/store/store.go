@@ -410,6 +410,26 @@ var schemaMigrations = []string{
 	CREATE INDEX IF NOT EXISTS idx_provider_model_state_key ON provider_model_state(key_id);`,
 	`ALTER TABLE providers ADD COLUMN model_allowlist_enabled INTEGER NOT NULL DEFAULT 0;
 	ALTER TABLE providers ADD COLUMN model_allowlist TEXT NOT NULL DEFAULT '[]';`,
+	`ALTER TABLE model_route_models ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0;
+	UPDATE model_route_models AS current
+	SET sort_order = (
+		SELECT COUNT(*) FROM model_route_models AS preceding
+		WHERE preceding.route_id=current.route_id
+			AND (preceding.priority>current.priority OR (preceding.priority=current.priority AND preceding.name<current.name))
+	);`,
+	`CREATE TABLE provider_model_global_state (
+		provider_id TEXT NOT NULL REFERENCES providers(id) ON DELETE CASCADE,
+		model_id TEXT NOT NULL,
+		consecutive_failures INTEGER NOT NULL DEFAULT 0,
+		cooldown_until TEXT,
+		last_error TEXT NOT NULL DEFAULT '',
+		last_status_code INTEGER,
+		success_count INTEGER NOT NULL DEFAULT 0,
+		failure_count INTEGER NOT NULL DEFAULT 0,
+		last_used_at TEXT,
+		PRIMARY KEY(provider_id,model_id)
+	);
+	CREATE INDEX idx_provider_model_global_state_cooldown ON provider_model_global_state(cooldown_until);`,
 }
 
 func Open(path, secretPath string) (*Store, error) {

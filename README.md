@@ -90,9 +90,9 @@ export GEMINI_API_KEY=sk-xxx
 - Provider 类型：`openai-compatible`、`anthropic-compatible`、`gemini-compatible`、`new-api`、`sub2api`、`custom`。
 - 代理接口：`/health`、`/status`、`/metrics`、`/v1/models`、`/v1/chat/completions`、`/v1/responses`、`/v1/messages`、`/messages`、`/v1beta/models/{model}:generateContent`、`/v1beta/models/{model}:streamGenerateContent`。
 - 代理请求会严格校验 JSON 和 `model`，响应通过 `X-Gateway-Request-ID` 提供可关联到本地请求日志的 ID；客户端主动取消不会计入上游 Key 失败或触发冷却。
-- 模型发现：添加或更新上游 Key 后自动读取模型列表并按 Key 持久保存模型库存，支持分页并合并同 Provider 下所有成功 Key 的模型集合，默认每 24 小时刷新；自动任务不会发起消耗 Token 的生成请求，单个 Key 发现失败或返回空列表时保留该 Key 上次成功库存。发现后可搜索、全选或仅选旗舰推荐模型，并开启 Provider 模型白名单。
-- 模型优先路由：客户端请求逻辑模型 ID 后，先按模型优先级，再按 Provider 优先级，最后按 Key 顺序尝试；当前模型的所有候选不可用后才进入下一备用模型。未配置逻辑模型时继续使用原有 `model_map` 和 Key 路由。
-- 路由健康：模型错误只冷却对应的 `(Provider, Key, 上游模型)`；同一次请求中，明确的“模型不存在/不支持”会跳过该 Provider 下其他 Key 的同模型，Key 无权限则继续尝试同 Provider 的其他 Key。鉴权、限流和网络类错误继续作用于 Key；恢复探测、连续失败阈值和 `Retry-After` 规则保持有效。
+- 模型发现：添加或更新上游 Key 后自动读取模型列表并按 Key 持久保存模型库存，支持分页并合并同 Provider 下所有成功 Key 的模型集合，默认每 24 小时刷新；自动任务不会发起消耗 Token 的生成请求，单个 Key 发现失败或返回空列表时保留该 Key 上次成功库存。发现后可搜索、全选或仅选择推荐模型，并开启 Provider 模型白名单。
+- 模型优先路由：客户端请求逻辑模型 ID 后，先按模型优先级，再按 Provider 优先级，最后按 Key 顺序尝试；同优先级模型按用户配置顺序排列，当前模型的所有候选不可用后才进入下一备用模型。未配置逻辑模型时继续使用原有 `model_map` 和 Key 路由。
+- 路由健康：上游明确表示模型不存在或不支持时，冷却作用于 `(Provider, 上游模型)`，后续请求和后来新增的 Key 都不会重复探测；Key 无模型权限时只冷却对应的 `(Provider, Key, 上游模型)`，仍会尝试同 Provider 的其他 Key。鉴权、限流和网络类错误继续作用于 Key；恢复探测、连续失败阈值和 `Retry-After` 规则保持有效。
 - 安全失败切换：401/403、429 等明确失败可切换到下一个 Key；网络错误、5xx、空 2xx 与流中断可能已在上游执行，默认不跨 Key 重试，避免重复生成和重复计费。仅在显式开启 `routing.retry_ambiguous_errors` 后恢复此类重试。
 - 容量优先级：显式逻辑路由默认严格等待当前最高优先级候选，繁忙时返回 `gateway_busy`；只有显式开启 `routing.fallback_on_busy` 才会把容量溢出到后续 Provider 或备用模型。未配置逻辑路由的原有 Key 容量切换保持不变。
 - 恢复探测：高优先级 key 首次达到失败阈值后 60 秒重试；仍失败则按 `cooldown_seconds`（默认 300 秒）继续探测，成功后自动回到高优先级 key。
@@ -163,11 +163,11 @@ Copy-Item config.example.yaml config.yaml
 ## 模型发现与优先路由
 
 1. 在 Provider 页面添加 URL 和 Key。网关会自动获取并保存模型列表，也可以点击“刷新模型”。Key 的“测试”操作会额外执行一次最小生成探针；自动发现和“刷新模型”只读取模型接口。
-2. 在 Provider 的模型库存中可搜索并勾选允许参与调度的模型；“仅旗舰”会按模型系列给出快速推荐。开启“仅调度已选择模型”后，新发现模型不会自动加入，空白名单会让该 Provider 暂停参与模型调度。
+2. 在 Key 编辑页的“模型路由”中可搜索并勾选允许参与调度的模型；“仅推荐”会按模型系列给出快速选择。该策略作用于 Key 所属 Provider 的全部 Key；开启“仅调度已选择模型”后，新发现模型不会自动加入，空白名单会让该 Provider 暂停参与模型调度。
 3. 在“模型优先路由”页面创建客户端请求的逻辑模型，例如 `coding-auto`，为其添加主模型和备用模型，并在每层选择允许使用的 Provider 与实际模型名。
-4. 客户端请求 `coding-auto` 时，候选顺序为“模型优先级 -> Provider 优先级 -> Key 顺序”。一个模型层级中每个 Provider 只能配置一个实际模型目标，避免隐式排序。显式逻辑路由会完整遍历确定性失败的候选；`routing.retry_per_request` 继续限制未配置逻辑路由的普通 Key 切换。网络错误和 5xx 等模糊失败仍受 `routing.retry_ambiguous_errors` 保护。
+4. 客户端请求 `coding-auto` 时，候选顺序为“模型优先级 -> 同优先级配置顺序 -> Provider 优先级 -> Key 顺序”。一个模型层级中每个 Provider 只能配置一个实际模型目标；同一 Provider 的第二个备用模型应放入下一模型层级。显式逻辑路由会完整遍历确定性失败的候选；`routing.retry_per_request` 继续限制未配置逻辑路由的普通 Key 切换。网络错误和 5xx 等模糊失败仍受 `routing.retry_ambiguous_errors` 保护。
 
-逻辑路由只影响与其 ID 完全匹配的请求，不会自动接管未选择的模型。`/v1/models` 只公布至少拥有一个启用 Provider/Key 的逻辑路由和 Provider 模型；删除最后一个目标 Provider 时，对应空路由会自动停用。
+逻辑路由只影响与其 ID 完全匹配的请求，不会自动接管未选择的模型。Provider 白名单同时约束直连和逻辑路由；启用路由时若目标被白名单排除，或更新白名单会破坏现有启用路由，保存操作会返回明确错误。`/v1/models` 只公布至少拥有一个启用 Provider/Key 的逻辑路由和 Provider 模型；删除最后一个目标 Provider 时，对应空路由会自动停用。
 
 ## 管理后台构建
 

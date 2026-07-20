@@ -67,6 +67,8 @@ func TestCrossProtocolConversionRejectsUnsupportedFeaturesInsteadOfDroppingThem(
 		{"Responses built-in tool", `{"model":"gpt","input":"hi","tools":[{"type":"web_search"}]}`, router.ProtocolOpenAIResponses, router.ProtocolOpenAI},
 		{"Chat multiple choices", `{"model":"gpt","messages":[{"role":"user","content":"hi"}],"n":2}`, router.ProtocolOpenAI, router.ProtocolOpenAIResponses},
 		{"Chat logprobs", `{"model":"gpt","messages":[{"role":"user","content":"hi"}],"logprobs":true}`, router.ProtocolOpenAI, router.ProtocolOpenAIResponses},
+		{"Chat audio input", `{"model":"gpt","messages":[{"role":"user","content":[{"type":"input_audio","input_audio":{"data":"AAAA","format":"wav"}}]}]}`, router.ProtocolOpenAI, router.ProtocolOpenAIResponses},
+		{"Chat assistant refusal", `{"model":"gpt","messages":[{"role":"assistant","content":null,"refusal":"cannot comply"}]}`, router.ProtocolOpenAI, router.ProtocolOpenAIResponses},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -158,7 +160,7 @@ func TestOpenAIResponsesRequestToChatCompletions(t *testing.T) {
 }
 
 func TestResponsesToolsAndMultimodalToChatCompletions(t *testing.T) {
-	body := []byte(`{"model":"gpt-5","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"inspect"},{"type":"input_image","image_url":"https://example.test/a.png","detail":"high"}]},{"type":"function_call_output","call_id":"call_1","output":"sunny"}],"tools":[{"type":"function","name":"weather","description":"Weather","parameters":{"type":"object"},"strict":true}],"tool_choice":{"type":"function","name":"weather"},"text":{"format":{"type":"json_schema","name":"answer","schema":{"type":"object"},"strict":true}},"reasoning":{"effort":"high"},"max_output_tokens":321,"stream":true}`)
+	body := []byte(`{"model":"gpt-5","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"inspect"},{"type":"input_image","image_url":"https://example.test/a.png","detail":"high"}]},{"type":"function_call_output","call_id":"call_1","output":"sunny"}],"tools":[{"type":"function","name":"weather","description":"Weather","parameters":{"type":"object"},"strict":true}],"tool_choice":{"type":"function","name":"weather"},"text":{"format":{"type":"json_schema","name":"answer","schema":{"type":"object"},"strict":true},"verbosity":"high"},"reasoning":{"effort":"high"},"max_output_tokens":321,"stream":true}`)
 	out, err := ConvertRequest(body, router.ProtocolOpenAIResponses, router.ProtocolOpenAI, "gpt-5", "")
 	if err != nil {
 		t.Fatal(err)
@@ -182,13 +184,13 @@ func TestResponsesToolsAndMultimodalToChatCompletions(t *testing.T) {
 	if stringField(asMap(tool["function"]), "name") != "weather" {
 		t.Fatalf("tools = %#v", raw["tools"])
 	}
-	if stringField(asMap(raw["response_format"]), "type") != "json_schema" || raw["reasoning_effort"] != "high" {
+	if stringField(asMap(raw["response_format"]), "type") != "json_schema" || raw["verbosity"] != "high" || raw["reasoning_effort"] != "high" {
 		t.Fatalf("format/reasoning = %#v", raw)
 	}
 }
 
 func TestChatCompletionsToolsToResponses(t *testing.T) {
-	body := []byte(`{"model":"gpt-5","messages":[{"role":"user","content":[{"type":"text","text":"weather"},{"type":"image_url","image_url":{"url":"https://example.test/a.png","detail":"low"}}]},{"role":"assistant","content":null,"tool_calls":[{"id":"call_1","type":"function","function":{"name":"weather","arguments":"{\"city\":\"Paris\"}"}}]},{"role":"tool","tool_call_id":"call_1","content":"sunny"}],"tools":[{"type":"function","function":{"name":"weather","parameters":{"type":"object"},"strict":true}}],"tool_choice":{"type":"function","function":{"name":"weather"}},"response_format":{"type":"json_schema","json_schema":{"name":"answer","schema":{"type":"object"}}},"reasoning_effort":"medium","max_completion_tokens":222,"stream":true}`)
+	body := []byte(`{"model":"gpt-5","messages":[{"role":"user","content":[{"type":"text","text":"weather"},{"type":"image_url","image_url":{"url":"https://example.test/a.png","detail":"low"}}]},{"role":"assistant","content":null,"tool_calls":[{"id":"call_1","type":"function","function":{"name":"weather","arguments":"{\"city\":\"Paris\"}"}}]},{"role":"tool","tool_call_id":"call_1","content":"sunny"}],"tools":[{"type":"function","function":{"name":"weather","parameters":{"type":"object"},"strict":true}}],"tool_choice":{"type":"function","function":{"name":"weather"}},"response_format":{"type":"json_schema","json_schema":{"name":"answer","schema":{"type":"object"}}},"verbosity":"low","reasoning_effort":"medium","max_completion_tokens":222,"stream":true}`)
 	out, err := ConvertRequest(body, router.ProtocolOpenAI, router.ProtocolOpenAIResponses, "gpt-5", "")
 	if err != nil {
 		t.Fatal(err)
@@ -205,7 +207,7 @@ func TestChatCompletionsToolsToResponses(t *testing.T) {
 	if stringField(asMap(slice(raw["tools"])[0]), "name") != "weather" || stringField(asMap(raw["tool_choice"]), "name") != "weather" {
 		t.Fatalf("tools = %#v choice = %#v", raw["tools"], raw["tool_choice"])
 	}
-	if stringField(asMap(asMap(raw["text"])["format"]), "type") != "json_schema" || stringField(asMap(raw["reasoning"]), "effort") != "medium" {
+	if stringField(asMap(asMap(raw["text"])["format"]), "type") != "json_schema" || stringField(asMap(raw["text"]), "verbosity") != "low" || stringField(asMap(raw["reasoning"]), "effort") != "medium" {
 		t.Fatalf("format/reasoning = %#v", raw)
 	}
 }
@@ -367,6 +369,21 @@ func TestStreamToolArgumentsRespectPerCallLimit(t *testing.T) {
 	_, err := ConvertStreamEvent("", []byte(`{"id":"chatcmpl-test","choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"tool","arguments":"123456"}}]}}]}`), router.ProtocolOpenAIResponses, router.ProtocolOpenAI, state)
 	if err == nil || !strings.Contains(err.Error(), "tool arguments") {
 		t.Fatalf("tool argument limit error = %v", err)
+	}
+}
+
+func TestNativeResponsesStreamPreservesAndMarksFailureEvent(t *testing.T) {
+	state := &StreamState{}
+	data := []byte(`{"type":"response.failed","response":{"id":"resp_failed","status":"failed","error":{"message":"capacity exhausted"}}}`)
+	frames, err := ConvertStreamEvent("response.failed", data, router.ProtocolOpenAIResponses, router.ProtocolOpenAIResponses, state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(frames) != 1 || frames[0].Event != "response.failed" || string(frames[0].Data) != string(data) {
+		t.Fatalf("native failure frame = %#v", frames)
+	}
+	if state.UpstreamError == nil || !IsUpstreamStreamError(state.UpstreamError) || !strings.Contains(state.UpstreamError.Error(), "capacity exhausted") {
+		t.Fatalf("native upstream error = %v", state.UpstreamError)
 	}
 }
 

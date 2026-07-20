@@ -314,63 +314,6 @@
                   <code>{{ providerApiEndpoint(p) }}</code>
                 </div>
               </div>
-              <div class="model-inventory">
-                <div class="model-inventory-head">
-                  <div>
-                    <div class="model-inventory-title">
-                      <strong>{{ t('model.inventory') }}</strong>
-                      <span :class="['pill', discoveryStatusClass(p.id)]">{{ discoveryStatusText(p.id) }}</span>
-                      <span class="pill">{{ providerDiscoveredModels(p.id).length }}</span>
-                    </div>
-                    <small v-if="discoveryForProvider(p.id).lastSuccessAt">{{ t('model.lastDiscovered') }} {{ formatGatewayTime(discoveryForProvider(p.id).lastSuccessAt) }}</small>
-                    <small v-else>{{ t('model.notDiscovered') }}</small>
-                  </div>
-                  <button class="ghost" type="button" :disabled="refreshingProviderId === p.id || !providerKeys(p.id).length" @click="refreshProviderModels(p)">
-                    {{ refreshingProviderId === p.id ? t('action.discoveringModels') : t('action.refreshModels') }}
-                  </button>
-                </div>
-                <div v-if="providerModelPreview(p.id).length" class="model-chip-list">
-                  <code v-for="model in providerModelPreview(p.id)" :key="model" class="model-chip">{{ model }}</code>
-                  <span v-if="providerDiscoveredModels(p.id).length > providerModelPreview(p.id).length" class="model-chip-more">+{{ providerDiscoveredModels(p.id).length - providerModelPreview(p.id).length }}</span>
-                </div>
-                <small v-else-if="discoveryForProvider(p.id).lastError" class="test-error">{{ discoveryForProvider(p.id).lastError }}</small>
-                <small v-else>{{ t('model.inventoryEmpty') }}</small>
-                <div v-if="providerModelPolicyOptions(p.id).length" class="model-policy">
-                  <div class="model-policy-head">
-                    <div>
-                      <strong>{{ t('model.policyTitle') }}</strong>
-                      <small>{{ t('model.policyCopy') }}</small>
-                    </div>
-                    <label class="check model-policy-toggle">
-                      <input type="checkbox" :checked="modelPolicyDraft(p.id).enabled" @change="setModelPolicyEnabled(p.id, $event.target.checked)">
-                      {{ t('model.policyEnabled') }}
-                    </label>
-                  </div>
-                  <div class="model-policy-toolbar">
-                    <input :value="modelPolicySearch[p.id] || ''" type="search" :placeholder="t('model.search')" @input="modelPolicySearch[p.id] = $event.target.value">
-                    <button class="ghost" type="button" @click="selectProviderModels(p.id, 'all')">{{ t('model.selectAll') }}</button>
-                    <button class="ghost flagship-action" type="button" @click="selectProviderModels(p.id, 'flagship')">{{ t('model.selectFlagship') }}</button>
-                    <button class="ghost" type="button" @click="selectProviderModels(p.id, 'clear')">{{ t('model.clearSelection') }}</button>
-                  </div>
-                  <div class="model-policy-summary">
-                    <small>{{ t('model.selectedCount', { selected: modelPolicyDraft(p.id).models.length, total: providerModelPolicyOptions(p.id).length }) }}</small>
-                    <small v-if="modelPolicyDraft(p.id).enabled && !modelPolicyDraft(p.id).models.length" class="test-error">{{ t('model.emptyPolicyWarning') }}</small>
-                  </div>
-                  <div class="model-policy-list">
-                    <label v-for="model in filteredProviderModelPolicyOptions(p.id)" :key="model" :class="['model-policy-item', {recommended: isFlagshipModel(model)}]">
-                      <input type="checkbox" :checked="modelPolicySelected(p.id, model)" @change="setProviderModelSelected(p.id, model, $event.target.checked)">
-                      <code>{{ model }}</code>
-                      <span v-if="isFlagshipModel(model)" class="flagship-tag">{{ t('model.flagship') }}</span>
-                    </label>
-                  </div>
-                  <div class="model-policy-actions">
-                    <small>{{ modelPolicyDraft(p.id).enabled ? t('model.policyActiveHint') : t('model.policyInactiveHint') }}</small>
-                    <button type="button" :disabled="!modelPolicyDraft(p.id).dirty || modelPolicySavingProviderId === p.id" @click="saveProviderModelPolicy(p)">
-                      {{ modelPolicySavingProviderId === p.id ? t('action.saving') : t('action.saveModelPolicy') }}
-                    </button>
-                  </div>
-                </div>
-              </div>
               <form v-if="keyFormOpen && !keyForm.editingId && keyForm.providerId === p.id" class="form-grid inline-edit-form key-inline-form" data-testid="key-form" @submit.prevent="saveKey">
                 <div class="inline-form-heading">
                   <strong>{{ t('action.addKey') }}</strong>
@@ -403,7 +346,7 @@
                   <span>{{ t('field.defaultModel') }}</span>
                   <select v-model="keyForm.defaultModel">
                     <option value="">{{ t('model.useRequestDefault') }}</option>
-                    <option v-for="model in providerModelOptions(keyForm.providerId)" :key="model" :value="model">{{ model }}</option>
+                    <option v-for="model in providerModelOptions(keyForm.providerId)" :key="model" :value="model" :class="{ 'flagship-option': isFlagshipModel(model) }">{{ modelOptionLabel(model) }}</option>
                   </select>
                   <small>{{ t('model.keyHint') }}</small>
                 </label>
@@ -442,11 +385,75 @@
                     <div class="model-select-field">
                       <select v-model="keyForm.defaultModel">
                         <option value="">{{ t('model.useRequestDefault') }}</option>
-                        <option v-for="model in providerModelOptions(keyForm.providerId)" :key="model" :value="model">{{ model }}</option>
+                        <option v-for="model in providerModelOptions(keyForm.providerId)" :key="model" :value="model" :class="{ 'flagship-option': isFlagshipModel(model) }">{{ modelOptionLabel(model) }}</option>
                       </select>
                       <small>{{ t('model.keyHint') }}</small>
                     </div>
                     <label class="check"><input v-model="keyForm.enabled" type="checkbox"> {{ t('status.enabled') }}</label>
+                    <section class="model-inventory key-model-management">
+                      <div class="model-inventory-head">
+                        <div>
+                          <div class="model-inventory-title">
+                            <strong>{{ t('model.inventory') }}</strong>
+                            <span :class="['pill', discoveryStatusClass(p.id)]">{{ discoveryStatusText(p.id) }}</span>
+                            <span class="pill">{{ providerDiscoveredModels(p.id).length }}</span>
+                          </div>
+                          <small v-if="discoveryForProvider(p.id).lastSuccessAt">{{ t('model.lastDiscovered') }} {{ formatGatewayTime(discoveryForProvider(p.id).lastSuccessAt) }}</small>
+                          <small v-else>{{ t('model.notDiscovered') }}</small>
+                        </div>
+                        <button class="ghost" type="button" :disabled="refreshingProviderId === p.id || !providerKeys(p.id).length" @click="refreshProviderModels(p)">
+                          {{ refreshingProviderId === p.id ? t('action.discoveringModels') : t('action.refreshModels') }}
+                        </button>
+                      </div>
+                      <div v-if="providerModelPreview(p.id).length" class="model-chip-list">
+                        <code v-for="model in providerModelPreview(p.id)" :key="model" class="model-chip">{{ model }}</code>
+                        <span v-if="providerDiscoveredModels(p.id).length > providerModelPreview(p.id).length" class="model-chip-more">+{{ providerDiscoveredModels(p.id).length - providerModelPreview(p.id).length }}</span>
+                      </div>
+                      <small v-else-if="discoveryForProvider(p.id).lastError" class="test-error">{{ discoveryForProvider(p.id).lastError }}</small>
+                      <small v-else>{{ t('model.inventoryEmpty') }}</small>
+                      <div v-if="providerModelPolicyOptions(p.id).length" class="model-policy">
+                        <div class="model-policy-head">
+                          <div>
+                            <strong>{{ t('model.policyTitle') }}</strong>
+                            <small>{{ t('model.policyCopy') }}</small>
+                          </div>
+                          <label class="check model-policy-toggle">
+                            <input type="checkbox" :checked="modelPolicyDraft(p.id).enabled" @change="setModelPolicyEnabled(p.id, $event.target.checked)">
+                            {{ t('model.policyEnabled') }}
+                          </label>
+                        </div>
+                        <details class="model-policy-picker">
+                          <summary>
+                            <span class="model-policy-picker-label">
+                              <strong>{{ t('model.chooseModels') }}</strong>
+                              <small>{{ t('model.selectedCount', { selected: modelPolicyDraft(p.id).models.length, total: providerModelPolicyOptions(p.id).length }) }}</small>
+                            </span>
+                          </summary>
+                          <div class="model-policy-picker-panel">
+                            <div class="model-policy-toolbar">
+                              <input :value="modelPolicySearch[p.id] || ''" type="search" :placeholder="t('model.search')" @input="modelPolicySearch[p.id] = $event.target.value" @keydown.enter.prevent>
+                              <button class="ghost" type="button" @click="selectProviderModels(p.id, 'all')">{{ t('model.selectAll') }}</button>
+                              <button class="ghost flagship-action" type="button" @click="selectProviderModels(p.id, 'flagship')">{{ t('model.selectFlagship') }}</button>
+                              <button class="ghost" type="button" @click="selectProviderModels(p.id, 'clear')">{{ t('model.clearSelection') }}</button>
+                            </div>
+                            <div class="model-policy-list">
+                              <label v-for="model in filteredProviderModelPolicyOptions(p.id)" :key="model" class="model-policy-item">
+                                <input type="checkbox" :checked="modelPolicySelected(p.id, model)" @change="setProviderModelSelected(p.id, model, $event.target.checked)">
+                                <code :class="{ 'flagship-option': isFlagshipModel(model) }">{{ modelOptionLabel(model) }}</code>
+                              </label>
+                              <small v-if="!filteredProviderModelPolicyOptions(p.id).length" class="model-policy-empty">{{ t('model.noMatches') }}</small>
+                            </div>
+                          </div>
+                        </details>
+                        <small v-if="modelPolicyDraft(p.id).enabled && !modelPolicyDraft(p.id).models.length" class="test-error">{{ t('model.emptyPolicyWarning') }}</small>
+                        <div class="model-policy-actions">
+                          <small>{{ modelPolicyDraft(p.id).enabled ? t('model.policyActiveHint') : t('model.policyInactiveHint') }}</small>
+                          <button type="button" :disabled="!modelPolicyDraft(p.id).dirty || modelPolicySavingProviderId === p.id" @click="saveProviderModelPolicy(p)">
+                            {{ modelPolicySavingProviderId === p.id ? t('action.saving') : t('action.saveModelPolicy') }}
+                          </button>
+                        </div>
+                      </div>
+                    </section>
                     <div class="form-actions">
                       <button class="ghost" type="button" data-testid="cancel-key" @click="cancelKeyForm">{{ t('action.cancel') }}</button>
                       <button type="submit">{{ t('action.updateKey') }}</button>
@@ -626,6 +633,7 @@
                     <span v-for="target in routeModel.targets" :key="target.providerId + ':' + target.upstreamModel" :class="['route-target-chip', {disabled: !target.enabled}]">
                       <strong>{{ providerDisplayName(target.providerId) }}</strong>
                       <code>{{ target.upstreamModel }}</code>
+                      <small v-if="modelProviderCooling(target.providerId, target.upstreamModel)">{{ t('modelRouting.providerCooling') }}</small>
                       <small v-if="modelCoolingCount(target.providerId, target.upstreamModel)">{{ t('modelRouting.coolingKeys', { count: modelCoolingCount(target.providerId, target.upstreamModel) }) }}</small>
                       <button
                         v-if="modelHasFailureState(target.providerId, target.upstreamModel)"

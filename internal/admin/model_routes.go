@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"local-ai-gateway/internal/model"
+	"local-ai-gateway/internal/router"
 )
 
 func (s *Service) modelRoutes(w http.ResponseWriter, r *http.Request, parts []string) {
@@ -89,9 +90,9 @@ func (s *Service) validateModelRoute(ctx context.Context, route *model.ModelRout
 	if err != nil {
 		return err
 	}
-	providerTypes := make(map[string]string, len(providers))
+	providersByID := make(map[string]model.Provider, len(providers))
 	for _, provider := range providers {
-		providerTypes[provider.ID] = provider.Type
+		providersByID[provider.ID] = provider
 	}
 	modelNames := make(map[string]struct{})
 	activeTargets := 0
@@ -113,16 +114,16 @@ func (s *Service) validateModelRoute(ctx context.Context, route *model.ModelRout
 		for targetIndex := range item.Targets {
 			target := &item.Targets[targetIndex]
 			target.ProviderID = strings.TrimSpace(target.ProviderID)
-			providerType, exists := providerTypes[target.ProviderID]
+			provider, exists := providersByID[target.ProviderID]
 			if !exists {
 				return fmt.Errorf("provider %q does not exist", target.ProviderID)
 			}
-			target.UpstreamModel = model.NormalizeModelID(providerType, target.UpstreamModel)
+			target.UpstreamModel = model.NormalizeModelID(provider.Type, target.UpstreamModel)
 			if target.ProviderID == "" || target.UpstreamModel == "" || len(target.UpstreamModel) > 512 {
 				return fmt.Errorf("model route targets require a provider and a 1-512 character upstream model")
 			}
 			if _, duplicate := providersInLayer[target.ProviderID]; duplicate {
-				return fmt.Errorf("route model %q can contain only one target for provider %q", item.Name, target.ProviderID)
+				return fmt.Errorf("route model %q can contain only one target for provider %q; add another fallback model tier to use a second model from that provider", item.Name, target.ProviderID)
 			}
 			providersInLayer[target.ProviderID] = struct{}{}
 			key := target.ProviderID + "\x00" + target.UpstreamModel
@@ -130,13 +131,45 @@ func (s *Service) validateModelRoute(ctx context.Context, route *model.ModelRout
 				return fmt.Errorf("duplicate target for provider %q and model %q", target.ProviderID, target.UpstreamModel)
 			}
 			targets[key] = struct{}{}
-			if item.Enabled && target.Enabled {
+			if route.Enabled && item.Enabled && target.Enabled {
+				if !router.ProviderAllowsModel(provider.Type, provider.ModelAllowlistEnabled, provider.ModelAllowlist, target.UpstreamModel) {
+					return fmt.Errorf("provider %q model allowlist excludes route target %q", target.ProviderID, target.UpstreamModel)
+				}
 				activeTargets++
 			}
 		}
 	}
 	if route.Enabled && activeTargets == 0 {
 		return fmt.Errorf("an enabled model route requires at least one enabled target")
+	}
+	return nil
+}
+
+func (s *Service) validateProviderRouteAllowlist(ctx context.Context, provider model.Provider) error {
+	if !provider.ModelAllowlistEnabled {
+		return nil
+	}
+	routes, err := s.store.ListModelRoutes(ctx)
+	if err != nil {
+		return err
+	}
+	for _, route := range routes {
+		if !route.Enabled {
+			continue
+		}
+		for _, routeModel := range route.Models {
+			if !routeModel.Enabled {
+				continue
+			}
+			for _, target := range routeModel.Targets {
+				if !target.Enabled || target.ProviderID != provider.ID {
+					continue
+				}
+				if !router.ProviderAllowsModel(provider.Type, true, provider.ModelAllowlist, target.UpstreamModel) {
+					return fmt.Errorf("model allowlist excludes active route %q target %q; add the model to the allowlist or disable the target first", route.ID, target.UpstreamModel)
+				}
+			}
+		}
 	}
 	return nil
 }

@@ -670,7 +670,7 @@ func TestAdminModelRouteCRUDAndValidation(t *testing.T) {
 		t.Fatalf("missing provider validation status = %d, body = %s", res.Code, res.Body.String())
 	}
 	res = authorizedAdminRequest(t, svc, http.MethodPost, "/admin/api/model-routes", `{"id":"ambiguous","enabled":true,"models":[{"name":"primary","priority":1,"enabled":true,"targets":[{"providerId":"high","upstreamModel":"model-a","enabled":true},{"providerId":"high","upstreamModel":"model-b","enabled":true}]}]}`)
-	if res.Code != http.StatusBadRequest || !strings.Contains(res.Body.String(), "only one target") {
+	if res.Code != http.StatusBadRequest || !strings.Contains(res.Body.String(), "only one target") || !strings.Contains(res.Body.String(), "another fallback model tier") {
 		t.Fatalf("duplicate provider target validation status = %d, body = %s", res.Code, res.Body.String())
 	}
 	res = authorizedAdminRequest(t, svc, http.MethodDelete, "/admin/api/model-routes/coding-auto", "")
@@ -680,6 +680,37 @@ func TestAdminModelRouteCRUDAndValidation(t *testing.T) {
 	res = authorizedAdminRequest(t, svc, http.MethodGet, "/admin/api/model-routes/coding-auto", "")
 	if res.Code != http.StatusNotFound {
 		t.Fatalf("deleted route status = %d, body = %s", res.Code, res.Body.String())
+	}
+}
+
+func TestModelRouteAllowlistConflictsAreRejectedExplicitly(t *testing.T) {
+	st := testAdminStore(t)
+	ctx := context.Background()
+	if _, err := st.UpsertProvider(ctx, model.Provider{
+		ID: "provider", Name: "provider", Type: model.ProviderOpenAICompatible, BaseURL: "https://provider.example", Enabled: true,
+		ModelAllowlistEnabled: true, ModelAllowlist: []string{"allowed"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	svc := New(st, config.Default())
+	blockedRoute := `{"id":"blocked","enabled":true,"models":[{"name":"primary","priority":100,"enabled":true,"targets":[{"providerId":"provider","upstreamModel":"blocked","enabled":true}]}]}`
+	res := authorizedAdminRequest(t, svc, http.MethodPost, "/admin/api/model-routes", blockedRoute)
+	if res.Code != http.StatusBadRequest || !strings.Contains(res.Body.String(), "allowlist excludes route target") {
+		t.Fatalf("blocked route status = %d, body = %s", res.Code, res.Body.String())
+	}
+	disabledRoute := `{"id":"disabled","enabled":false,"models":[{"name":"primary","priority":100,"enabled":true,"targets":[{"providerId":"provider","upstreamModel":"blocked","enabled":true}]}]}`
+	res = authorizedAdminRequest(t, svc, http.MethodPost, "/admin/api/model-routes", disabledRoute)
+	if res.Code != http.StatusOK {
+		t.Fatalf("disabled conflicting route status = %d, body = %s", res.Code, res.Body.String())
+	}
+	allowedRoute := `{"id":"allowed-route","enabled":true,"models":[{"name":"primary","priority":100,"enabled":true,"targets":[{"providerId":"provider","upstreamModel":"allowed","enabled":true}]}]}`
+	res = authorizedAdminRequest(t, svc, http.MethodPost, "/admin/api/model-routes", allowedRoute)
+	if res.Code != http.StatusOK {
+		t.Fatalf("allowed route status = %d, body = %s", res.Code, res.Body.String())
+	}
+	res = authorizedAdminRequest(t, svc, http.MethodPatch, "/admin/api/providers/provider", `{"modelAllowlistEnabled":true,"modelAllowlist":["other"]}`)
+	if res.Code != http.StatusBadRequest || !strings.Contains(res.Body.String(), "excludes active route") {
+		t.Fatalf("conflicting allowlist update status = %d, body = %s", res.Code, res.Body.String())
 	}
 }
 

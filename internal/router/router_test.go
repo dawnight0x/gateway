@@ -267,11 +267,41 @@ func TestProviderModelUnavailableDistinguishesAbsenceFromEntitlement(t *testing.
 		{status: http.StatusBadRequest, message: `unsupported-model`, want: true},
 		{status: http.StatusBadRequest, message: `模型不存在`, want: true},
 		{status: http.StatusForbidden, message: `no access to model gpt-x`, want: false},
+		{status: http.StatusNotFound, message: `The model gpt-x does not exist or you do not have access to it`, want: false},
+		{status: http.StatusForbidden, message: `模型不存在或无权访问模型`, want: false},
 		{status: http.StatusForbidden, message: `没有模型权限`, want: false},
 	} {
 		if got := ProviderModelUnavailable(test.status, test.message); got != test.want {
 			t.Fatalf("status=%d message=%q got=%v want=%v", test.status, test.message, got, test.want)
 		}
+	}
+}
+
+func TestGeminiModelStateUsesCanonicalModelID(t *testing.T) {
+	ctx := context.Background()
+	st := testStore(t)
+	_, _ = st.UpsertProvider(ctx, model.Provider{
+		ID: "gemini", Name: "gemini", Type: model.ProviderGeminiCompatible, BaseURL: "http://gemini", Enabled: true,
+		ModelMap: map[string]string{"public": "models/gemini-test"},
+	})
+	_, _ = st.UpsertKey(ctx, model.Key{ID: "gemini-key", ProviderID: "gemini", Name: "key", Secret: "secret", Enabled: true})
+
+	rt := New(st, config.Default().Routing)
+	items, err := rt.Candidates(ctx, "public", ProtocolGemini)
+	if err != nil || len(items) != 1 || items[0].UpstreamModel != "gemini-test" {
+		t.Fatalf("canonical Gemini candidates = %#v, err = %v", items, err)
+	}
+
+	status := http.StatusNotFound
+	if err := st.RecordProviderWideModelFailure(ctx, "gemini", "models/gemini-test", &status, "model not found", store.FailurePolicy{
+		Threshold: 1, Cooldown: time.Hour, ForceCooldown: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	rt.invalidateCache()
+	items, err = rt.Candidates(ctx, "public", ProtocolGemini)
+	if err != nil || len(items) != 0 {
+		t.Fatalf("legacy prefixed state did not cool canonical model: %#v, err = %v", items, err)
 	}
 }
 
@@ -471,6 +501,25 @@ func TestRouteCandidatesSortsIndependentlyOfInputOrder(t *testing.T) {
 	}
 }
 
+func TestRouteCandidatesEqualPriorityPreservesConfiguredModelOrder(t *testing.T) {
+	keys := []model.Key{{
+		ID: "key", ProviderID: "provider", ProviderType: model.ProviderOpenAICompatible,
+		ProviderEnabled: true, Enabled: true,
+	}}
+	route := model.ModelRoute{
+		ID: "logical", Enabled: true,
+		Models: []model.ModelRouteModel{
+			{Name: "zzz-model", Priority: 100, Enabled: true, Targets: []model.ModelRouteTarget{{ProviderID: "provider", UpstreamModel: "zzz-upstream", Enabled: true}}},
+			{Name: "aaa-model", Priority: 100, Enabled: true, Targets: []model.ModelRouteTarget{{ProviderID: "provider", UpstreamModel: "aaa-upstream", Enabled: true}}},
+		},
+	}
+
+	items := routeCandidates(keys, route, nil, ProtocolOpenAI)
+	if len(items) != 2 || items[0].RouteModel != "zzz-model" || items[1].RouteModel != "aaa-model" {
+		t.Fatalf("equal-priority candidates = %#v", items)
+	}
+}
+
 func TestProviderModelAllowlistFiltersDirectAndLogicalRoutes(t *testing.T) {
 	ctx := context.Background()
 	st := testStore(t)
@@ -582,5 +631,53 @@ func TestModelUnavailableCoolsOnlyFailingKeyModelPair(t *testing.T) {
 	}
 	if len(items) != 1 || items[0].ID != "key-b" {
 		t.Fatalf("candidates after key-specific model cooldown = %#v", items)
+	}
+}
+
+func TestProviderModelUnavailableCooldownAppliesAcrossKeysAndRequests(t *testing.T) {
+	ctx := context.Background()
+	st := testStore(t)
+	_, _ = st.UpsertProvider(ctx, model.Provider{ID: "provider", Name: "provider", Type: model.ProviderOpenAICompatible, BaseURL: "http://provider", Enabled: true})
+	_, _ = st.UpsertKey(ctx, model.Key{ID: "key-a", ProviderID: "provider", Name: "a", Secret: "a", Priority: 100, Enabled: true})
+	_, _ = st.UpsertKey(ctx, model.Key{ID: "key-b", ProviderID: "provider", Name: "b", Secret: "b", Priority: 10, Enabled: true})
+	_, err := st.UpsertModelRoute(ctx, model.ModelRoute{
+		ID: "logical", Name: "logical", Enabled: true,
+		Models: []model.ModelRouteModel{{
+			Name: "primary", Priority: 100, Enabled: true,
+			Targets: []model.ModelRouteTarget{{ProviderID: "provider", UpstreamModel: "missing-model", Enabled: true}},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rt := New(st, config.Default().Routing)
+	items, err := rt.Candidates(ctx, "logical", ProtocolOpenAI)
+	if err != nil || len(items) != 2 {
+		t.Fatalf("initial candidates = %#v, err = %v", items, err)
+	}
+	if err := rt.RecordCandidateFailure(ctx, items[0], Failure{
+		Status: http.StatusNotFound, ErrorType: "model_unavailable", Message: "model not found",
+		ProviderModelUnavailable: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	items, err = rt.Candidates(ctx, "logical", ProtocolOpenAI)
+	if err != nil || len(items) != 0 {
+		t.Fatalf("provider-wide cooldown candidates = %#v, err = %v", items, err)
+	}
+
+	_, _ = st.UpsertKey(ctx, model.Key{ID: "key-c", ProviderID: "provider", Name: "c", Secret: "c", Priority: 1, Enabled: true})
+	rt.invalidateCache()
+	items, err = rt.Candidates(ctx, "logical", ProtocolOpenAI)
+	if err != nil || len(items) != 0 {
+		t.Fatalf("new key bypassed provider-wide cooldown: %#v, err = %v", items, err)
+	}
+	states, err := st.ListProviderModelStates(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(states) != 1 || states[0].Scope != "provider" || states[0].KeyID != "" || states[0].CooldownUntil == nil {
+		t.Fatalf("provider-wide model states = %#v", states)
 	}
 }

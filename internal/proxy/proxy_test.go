@@ -85,6 +85,30 @@ func TestFailoverToSecondKey(t *testing.T) {
 	}
 }
 
+func TestNativeStreamFailureIsForwardedAndReportedAsUpstreamError(t *testing.T) {
+	cfg := config.Default()
+	svc := &Service{cfg: cfg}
+	request := httptest.NewRequest(http.MethodPost, "http://upstream/v1/responses", nil)
+	response := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body: io.NopCloser(strings.NewReader(
+			"event: response.failed\n" +
+				`data: {"type":"response.failed","response":{"status":"failed","error":{"message":"capacity exhausted"}}}` + "\n\n",
+		)),
+		Request: request,
+	}
+	recorder := httptest.NewRecorder()
+	result := svc.pipeStream(recorder, response, model.Key{}, router.ProtocolOpenAIResponses, router.ProtocolOpenAIResponses)
+
+	if result.ok || !result.committed || result.errorType != "upstream_error" || !strings.Contains(result.message, "capacity exhausted") {
+		t.Fatalf("stream result = %#v", result)
+	}
+	if !strings.Contains(recorder.Body.String(), "response.failed") || !strings.Contains(recorder.Body.String(), "capacity exhausted") {
+		t.Fatalf("forwarded stream = %s", recorder.Body.String())
+	}
+}
+
 func TestModelRouteExhaustsProvidersBeforeFallbackModel(t *testing.T) {
 	var callsMu sync.Mutex
 	calls := make([]string, 0)
@@ -210,7 +234,7 @@ func TestModelRouteExhaustsProvidersBeforeFallbackModel(t *testing.T) {
 		t.Fatalf("first attempt order = %s", got)
 	}
 
-	if err := st.ResetProviderModelState(ctx, "high", "high-key", "high-primary"); err != nil {
+	if err := st.ResetProviderModelStates(ctx, "high", "high-primary"); err != nil {
 		t.Fatal(err)
 	}
 	lowPrimaryUnavailable.Store(true)
@@ -224,8 +248,8 @@ func TestModelRouteExhaustsProvidersBeforeFallbackModel(t *testing.T) {
 	}
 	gw.Close()
 
-	for _, providerModel := range [][3]string{{"high", "high-key", "high-primary"}, {"low", "low-key", "low-primary"}} {
-		if err := st.ResetProviderModelState(ctx, providerModel[0], providerModel[1], providerModel[2]); err != nil {
+	for _, providerModel := range [][2]string{{"high", "high-primary"}, {"low", "low-primary"}} {
+		if err := st.ResetProviderModelStates(ctx, providerModel[0], providerModel[1]); err != nil {
 			t.Fatal(err)
 		}
 	}

@@ -66,7 +66,9 @@ type Key struct {
 	RouteID                       string            `json:"routeId,omitempty"`
 	RouteModel                    string            `json:"routeModel,omitempty"`
 	ModelPriority                 int               `json:"modelPriority,omitempty"`
+	ModelOrder                    int               `json:"-"`
 	ModelCooldownUntil            *time.Time        `json:"modelCooldownUntil,omitempty"`
+	ModelCooldownScope            string            `json:"-"`
 }
 
 type ProviderModelDiscovery struct {
@@ -82,6 +84,7 @@ type ProviderModelState struct {
 	ProviderID          string     `json:"providerId"`
 	KeyID               string     `json:"keyId"`
 	ModelID             string     `json:"modelId"`
+	Scope               string     `json:"scope"`
 	ConsecutiveFailures int        `json:"consecutiveFailures"`
 	CooldownUntil       *time.Time `json:"cooldownUntil,omitempty"`
 	LastError           string     `json:"lastError,omitempty"`

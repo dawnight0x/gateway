@@ -298,6 +298,9 @@ func responsesToChatCompletions(in map[string]any, modelName string) map[string]
 		if format := asMap(text["format"]); len(format) > 0 {
 			out["response_format"] = responsesFormatToChat(format)
 		}
+		if verbosity, ok := text["verbosity"]; ok {
+			out["verbosity"] = verbosity
+		}
 	}
 	if reasoning := asMap(in["reasoning"]); len(reasoning) > 0 {
 		if effort, ok := reasoning["effort"]; ok {
@@ -324,8 +327,15 @@ func chatCompletionsToResponses(in map[string]any, modelName string) map[string]
 	if choice := chatToolChoiceToResponses(in["tool_choice"]); choice != nil {
 		out["tool_choice"] = choice
 	}
+	text := map[string]any{}
 	if format := asMap(in["response_format"]); len(format) > 0 {
-		out["text"] = map[string]any{"format": chatFormatToResponses(format)}
+		text["format"] = chatFormatToResponses(format)
+	}
+	if verbosity, ok := in["verbosity"]; ok {
+		text["verbosity"] = verbosity
+	}
+	if len(text) > 0 {
+		out["text"] = text
 	}
 	if effort, ok := in["reasoning_effort"]; ok {
 		out["reasoning"] = map[string]any{"effort": effort}
@@ -619,6 +629,35 @@ func validateChatToResponses(raw map[string]any) error {
 	for _, rawTool := range slice(raw["tools"]) {
 		if toolType := stringOr(asMap(rawTool)["type"], "function"); toolType != "function" {
 			return unsupportedCrossProtocol(router.ProtocolOpenAI, router.ProtocolOpenAIResponses, "tool "+toolType)
+		}
+	}
+	for _, rawMessage := range slice(raw["messages"]) {
+		message := asMap(rawMessage)
+		if stringField(message, "role") == "function" {
+			return unsupportedCrossProtocol(router.ProtocolOpenAI, router.ProtocolOpenAIResponses, "function message")
+		}
+		for _, field := range []string{"function_call", "audio", "refusal", "name"} {
+			if meaningful(message[field]) {
+				return unsupportedCrossProtocol(router.ProtocolOpenAI, router.ProtocolOpenAIResponses, "message "+field)
+			}
+		}
+		if err := validateChatContentForResponses(message["content"]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateChatContentForResponses(value any) error {
+	if _, ok := value.(string); ok || value == nil {
+		return nil
+	}
+	for _, rawPart := range slice(value) {
+		typeName := stringField(asMap(rawPart), "type")
+		switch typeName {
+		case "text", "input_text", "output_text", "image_url", "input_image", "file", "input_file":
+		default:
+			return unsupportedCrossProtocol(router.ProtocolOpenAI, router.ProtocolOpenAIResponses, "content block "+typeName)
 		}
 	}
 	return nil

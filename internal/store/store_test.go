@@ -847,6 +847,56 @@ func TestModelRouteRoundTripPreservesModelAndProviderPriorityOrder(t *testing.T)
 	}
 }
 
+func TestModelRouteRoundTripPreservesEqualPriorityModelOrder(t *testing.T) {
+	st := openTestStore(t, Options{Timezone: "Asia/Singapore"})
+	ctx := context.Background()
+	if _, err := st.UpsertProvider(ctx, model.Provider{ID: "provider", Name: "provider", Type: model.ProviderOpenAICompatible, BaseURL: "https://provider.test", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	route, err := st.UpsertModelRoute(ctx, model.ModelRoute{
+		ID: "equal-priority", Name: "equal-priority", Enabled: true,
+		Models: []model.ModelRouteModel{
+			{Name: "zzz-model", Priority: 100, Enabled: true, Targets: []model.ModelRouteTarget{{ProviderID: "provider", UpstreamModel: "zzz", Enabled: true}}},
+			{Name: "aaa-model", Priority: 100, Enabled: true, Targets: []model.ModelRouteTarget{{ProviderID: "provider", UpstreamModel: "aaa", Enabled: true}}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(route.Models) != 2 || route.Models[0].Name != "zzz-model" || route.Models[1].Name != "aaa-model" {
+		t.Fatalf("equal-priority route models = %#v", route.Models)
+	}
+}
+
+func TestProviderWideModelStateCanBeListedAndReset(t *testing.T) {
+	st := openTestStore(t, Options{Timezone: "Asia/Singapore"})
+	ctx := context.Background()
+	if _, err := st.UpsertProvider(ctx, model.Provider{ID: "provider", Name: "provider", Type: model.ProviderOpenAICompatible, BaseURL: "https://provider.test", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	status := http.StatusNotFound
+	if err := st.RecordProviderWideModelFailure(ctx, "provider", "missing", &status, "model not found", FailurePolicy{Threshold: 1, Cooldown: time.Minute, ForceCooldown: true}); err != nil {
+		t.Fatal(err)
+	}
+	states, err := st.ListProviderModelStates(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(states) != 1 || states[0].Scope != "provider" || states[0].KeyID != "" || states[0].CooldownUntil == nil {
+		t.Fatalf("provider-wide states = %#v", states)
+	}
+	if err := st.ResetProviderModelStates(ctx, "provider", "missing"); err != nil {
+		t.Fatal(err)
+	}
+	states, err = st.ListProviderModelStates(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(states) != 1 || states[0].ConsecutiveFailures != 0 || states[0].CooldownUntil != nil || states[0].LastError != "" {
+		t.Fatalf("provider-wide states after reset = %#v", states)
+	}
+}
+
 func TestDeleteProviderDisablesRouteAfterLastTargetIsRemoved(t *testing.T) {
 	st := openTestStore(t, Options{Timezone: "Asia/Singapore"})
 	ctx := context.Background()

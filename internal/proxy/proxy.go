@@ -441,10 +441,11 @@ func (s *Service) attemptKey(w http.ResponseWriter, r *http.Request, key model.K
 
 	if router.CountsAgainstKeyHealth(result.errorType) || router.CountsAgainstModelHealth(result.errorType) {
 		if err := s.router.RecordCandidateFailure(r.Context(), key, router.Failure{
-			Status:            result.status,
-			ErrorType:         result.errorType,
-			Message:           result.message,
-			RetryAfterSeconds: result.retryAfterSeconds,
+			Status:                   result.status,
+			ErrorType:                result.errorType,
+			Message:                  result.message,
+			RetryAfterSeconds:        result.retryAfterSeconds,
+			ProviderModelUnavailable: result.providerModelUnavailable,
 		}); err != nil {
 			slog.Warn("record upstream failure failed", "key_id", key.ID, "error", err)
 		}

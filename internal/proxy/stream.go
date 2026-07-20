@@ -113,6 +113,9 @@ func (s *Service) pipeStream(w http.ResponseWriter, resp *http.Response, key mod
 				return err
 			}
 		}
+		if state.UpstreamError != nil {
+			return state.UpstreamError
+		}
 		return nil
 	}
 
@@ -187,6 +190,9 @@ func (s *Service) pipeStream(w http.ResponseWriter, resp *http.Response, key mod
 func streamFailure(output *streamOutput, status int, usage protocol.Usage, err error, retryBeforeFirstByte bool) attemptResult {
 	if !output.committed {
 		return attemptResult{status: http.StatusBadGateway, errorType: "upstream_error", message: err.Error(), retryable: retryBeforeFirstByte, ambiguous: true}
+	}
+	if protocol.IsUpstreamStreamError(err) {
+		return attemptResult{committed: true, status: status, errorType: "upstream_error", message: err.Error(), usage: usage}
 	}
 	return attemptResult{committed: true, status: status, errorType: "stream_interrupted", message: err.Error(), usage: usage}
 }

@@ -4,6 +4,9 @@ import test from 'node:test';
 import vm from 'node:vm';
 
 const appSource = await readFile(new URL('../web/admin/assets/app.js', import.meta.url), 'utf8');
+const templateSource = await readFile(new URL('../web/admin/index.template.html', import.meta.url), 'utf8');
+const stylesSource = await readFile(new URL('../web/admin/assets/styles.css', import.meta.url), 'utf8');
+const i18nSource = await readFile(new URL('../web/admin/assets/i18n.js', import.meta.url), 'utf8');
 
 const response = (data, status = 200) => ({
   ok: status >= 200 && status < 300,
@@ -244,8 +247,9 @@ test('dashboard refresh restores persisted model inventories and routes', async 
         modelDiscovery: { acme: { providerId: 'acme', status: 'ok', modelCount: 2 } },
         modelRoutes: [route],
         modelStates: [
-          { providerId: 'acme', keyId: 'key-a', modelId: 'gpt-primary', failureCount: 1, consecutiveFailures: 1, cooldownUntil: '2999-01-01T00:00:00Z' },
-          { providerId: 'acme', keyId: 'key-b', modelId: 'gpt-primary', failureCount: 1, consecutiveFailures: 1, cooldownUntil: '2000-01-01T00:00:00Z' },
+          { providerId: 'acme', keyId: '', modelId: 'gpt-primary', scope: 'provider', failureCount: 1, consecutiveFailures: 1, cooldownUntil: '2999-01-01T00:00:00Z' },
+          { providerId: 'acme', keyId: 'key-a', modelId: 'gpt-primary', scope: 'key', failureCount: 1, consecutiveFailures: 1, cooldownUntil: '2999-01-01T00:00:00Z' },
+          { providerId: 'acme', keyId: 'key-b', modelId: 'gpt-primary', scope: 'key', failureCount: 1, consecutiveFailures: 1, cooldownUntil: '2000-01-01T00:00:00Z' },
         ],
       });
     },
@@ -257,10 +261,12 @@ test('dashboard refresh restores persisted model inventories and routes', async 
   assert.equal(harness.exposed.discoveryForProvider('acme').status, 'ok');
   assert.equal(harness.exposed.modelRoutes.value[0].id, 'coding-auto');
   assert.equal(harness.exposed.modelCoolingCount('acme', 'gpt-primary'), 1);
+  assert.equal(harness.exposed.modelProviderCooling('acme', 'gpt-primary'), true);
   assert.equal(harness.exposed.modelHasFailureState('acme', 'gpt-primary'), true);
+  assert.match(templateSource, /modelProviderCooling\(target\.providerId, target\.upstreamModel\)/);
 });
 
-test('model health reset targets every key for a provider model', async () => {
+test('model health reset targets all health state for a provider model', async () => {
   const requests = [];
   const harness = createHarness({
     fetchImpl: async (url, options = {}) => {
@@ -387,9 +393,11 @@ test('provider model refresh calls the discovery-only endpoint', async () => {
   assert.equal(harness.exposed.refreshingProviderId.value, '');
 });
 
-test('flagship recommendation recognizes leading model families and excludes utility models', () => {
+test('model recommendation recognizes configured and leading model families while excluding utility models', () => {
   const harness = createHarness();
   for (const model of [
+    'newapi/step-3.7-flash',
+    'newapi/kat-coder-pro-V2',
     'moonshotai/kimi-k2.6',
     'deepseek-ai/deepseek-v4-flash',
     'deepseek-ai/deepseek-v4-pro',
@@ -397,12 +405,60 @@ test('flagship recommendation recognizes leading model families and excludes uti
     'z-ai/glm-5.2',
     'grok-4.5',
     'openai/gpt-5.2',
+    'openai/gpt-5.5',
+    'openai/gpt-5.5-openai-compact',
+    'openai/gpt-5.6',
+    'openai/gpt-5.6-luna',
+    'openai/gpt-5.6-sol',
+    'openai/gpt-5.6-sol-openai-compact',
+    'openai/gpt-5.6-terra',
+    'openai/gpt-5.6-terra-openai-compact',
+    'openai/gpt-image-2',
     'anthropic/claude-opus-4',
   ]) {
     assert.equal(harness.exposed.isFlagshipModel(model), true, model);
   }
   assert.equal(harness.exposed.isFlagshipModel('text-embedding-3-large'), false);
   assert.equal(harness.exposed.isFlagshipModel('vendor/legacy-chat-small'), false);
+});
+
+test('recommendation labels appear in upstream key model selects', () => {
+  const harness = createHarness();
+  assert.match(templateSource, /<details class="model-policy-picker">/);
+  const keyOptions = templateSource.match(/<option v-for="model in providerModelOptions\(keyForm\.providerId\)"[^>]*>\{\{ modelOptionLabel\(model\) \}\}<\/option>/g) || [];
+  assert.equal(keyOptions.length, 2);
+  assert.doesNotMatch(templateSource, /class="flagship-tag"/);
+  assert.equal(harness.exposed.modelOptionLabel('openai/gpt-5.2'), 'openai/gpt-5.2 · model.recommended');
+  assert.equal(harness.exposed.modelOptionLabel('vendor/legacy-chat-small'), 'vendor/legacy-chat-small');
+  assert.match(stylesSource, /\.model-policy-picker:not\(\[open\]\)\s*>\s*\.model-policy-picker-panel\s*\{\s*display:\s*none;/);
+});
+
+test('provider model routing and policy controls live inside the edit-key form', () => {
+  const editFormStart = templateSource.indexOf('<form v-if="keyFormOpen && keyForm.editingId === k.id"');
+  const modelManagement = templateSource.indexOf('<section class="model-inventory key-model-management">');
+  const editFormEnd = templateSource.indexOf('</form>', editFormStart);
+  assert.ok(editFormStart >= 0);
+  assert.ok(modelManagement > editFormStart && modelManagement < editFormEnd);
+  assert.equal(templateSource.match(/class="model-inventory key-model-management"/g)?.length, 1);
+  assert.match(stylesSource, /\.key-model-management\s*\{[^}]*grid-column:\s*1\s*\/\s*-1;/s);
+  assert.match(i18nSource, /'model\.inventory': '模型路由'/);
+  assert.match(i18nSource, /'model\.inventory': 'Model routing'/);
+});
+
+test('model routing picker marks recommendations while preserving raw checkbox values', () => {
+  const harness = createHarness();
+  assert.match(templateSource, /<code :class="\{ 'flagship-option': isFlagshipModel\(model\) \}">\{\{ modelOptionLabel\(model\) \}\}<\/code>/);
+  assert.match(templateSource, /setProviderModelSelected\(p\.id, model, \$event\.target\.checked\)/);
+  assert.match(stylesSource, /\.model-policy-item code\.flagship-option\s*\{[^}]*color:\s*var\(--amber\);[^}]*font-weight:\s*700;/s);
+  assert.equal(harness.exposed.modelOptionLabel('newapi/step-3.7-flash'), 'newapi/step-3.7-flash · model.recommended');
+  assert.equal(harness.exposed.modelOptionLabel('legacy-chat-small'), 'legacy-chat-small');
+});
+
+test('model routing search cannot submit the surrounding key form', () => {
+  assert.match(
+    templateSource,
+    /type="search"[^>]*@input="modelPolicySearch\[p\.id\] = \$event\.target\.value"[^>]*@keydown\.enter\.prevent/,
+  );
 });
 
 test('flagship quick selection persists a provider model allowlist', async () => {

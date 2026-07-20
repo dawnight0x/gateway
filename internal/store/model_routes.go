@@ -43,7 +43,7 @@ func (s *Store) ListModelRoutes(ctx context.Context) ([]model.ModelRoute, error)
 
 	modelRows, err := s.db.QueryContext(ctx, `
 		SELECT route_id,name,priority,enabled
-		FROM model_route_models ORDER BY route_id,priority DESC,name
+		FROM model_route_models ORDER BY route_id,priority DESC,sort_order,name
 	`)
 	if err != nil {
 		return nil, err
@@ -135,11 +135,11 @@ func (s *Store) UpsertModelRoute(ctx context.Context, route model.ModelRoute) (m
 	if _, err := tx.ExecContext(ctx, `DELETE FROM model_route_models WHERE route_id=?`, route.ID); err != nil {
 		return route, err
 	}
-	for _, routeModel := range route.Models {
+	for modelIndex, routeModel := range route.Models {
 		routeModel.Name = strings.TrimSpace(routeModel.Name)
 		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO model_route_models (route_id,name,priority,enabled) VALUES (?,?,?,?)
-		`, route.ID, routeModel.Name, routeModel.Priority, boolInt(routeModel.Enabled)); err != nil {
+			INSERT INTO model_route_models (route_id,name,priority,enabled,sort_order) VALUES (?,?,?,?,?)
+		`, route.ID, routeModel.Name, routeModel.Priority, boolInt(routeModel.Enabled), modelIndex); err != nil {
 			return route, err
 		}
 		for _, target := range routeModel.Targets {

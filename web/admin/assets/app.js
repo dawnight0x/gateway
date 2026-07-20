@@ -616,6 +616,9 @@ createApp({
       if (!value) return false;
       if (/(?:^|[/_.-])(embed(?:ding)?|rerank|moderation|guard|safety|tts|speech|whisper|transcri(?:be|ption)|ocr)(?:$|[/_.-])/.test(value)) return false;
       return [
+        /(?:^|\/)step-3\.7-flash$/,
+        /(?:^|\/)kat-coder-pro-v2$/,
+        /(?:^|\/)gpt-image-2$/,
         /(?:^|[/_.-])gpt[/_.-]?(?:5|4(?:[/_.-]?1|o)?)(?:$|[/_.-])/,
         /(?:^|[/_.-])o(?:1|3|4)(?:$|[/_.-])/,
         /claude.*(?:opus|sonnet)/,
@@ -630,6 +633,10 @@ createApp({
         /llama.*(?:70b|405b)/,
       ].some((pattern) => pattern.test(value));
     };
+
+    const modelOptionLabel = (modelId) => (
+      isFlagshipModel(modelId) ? `${modelId} · ${t('model.recommended')}` : modelId
+    );
 
     const syncModelPolicyDrafts = (nextProviders) => {
       const active = new Set();
@@ -902,9 +909,19 @@ createApp({
     const modelCoolingCount = (providerId, upstreamModel) => {
       const now = Date.now();
       return modelStatesFor(providerId, upstreamModel).filter((item) => {
+        if (item.scope === 'provider') return false;
         const until = Date.parse(item.cooldownUntil || '');
         return Number.isFinite(until) && until > now;
       }).length;
+    };
+
+    const modelProviderCooling = (providerId, upstreamModel) => {
+      const now = Date.now();
+      return modelStatesFor(providerId, upstreamModel).some((item) => {
+        if (item.scope !== 'provider') return false;
+        const until = Date.parse(item.cooldownUntil || '');
+        return Number.isFinite(until) && until > now;
+      });
     };
 
     const modelHasFailureState = (providerId, upstreamModel) => modelStatesFor(providerId, upstreamModel).some(
@@ -1363,6 +1380,7 @@ createApp({
       modelRoutes,
       routeProviderSelected,
       modelCoolingCount,
+      modelProviderCooling,
       modelHasFailureState,
       resetModelState,
       modelStates,
@@ -1384,6 +1402,7 @@ createApp({
       modelPolicySelected,
       modelPolicySavingProviderId,
       isFlagshipModel,
+      modelOptionLabel,
       setModelPolicyEnabled,
       setProviderModelSelected,
       selectProviderModels,

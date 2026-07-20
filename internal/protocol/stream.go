@@ -2,6 +2,7 @@ package protocol
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -36,6 +37,25 @@ type StreamState struct {
 	MaxToolArgumentBytes int
 	aggregateBytes       int
 	ResourceIDs          []string
+	UpstreamError        error
+}
+
+type upstreamStreamError struct {
+	protocol string
+	message  string
+}
+
+func (e *upstreamStreamError) Error() string {
+	return e.protocol + " stream error: " + e.message
+}
+
+func newUpstreamStreamError(protocolName, message string) error {
+	return &upstreamStreamError{protocol: protocolName, message: stringOr(message, "upstream error")}
+}
+
+func IsUpstreamStreamError(err error) bool {
+	var target *upstreamStreamError
+	return errors.As(err, &target)
 }
 
 type streamToolState struct {
@@ -165,6 +185,8 @@ func ConvertStreamEvent(event string, data []byte, inbound, upstream string, sta
 			if err := updateStreamState(state, normalized); err != nil {
 				return nil, err
 			}
+		} else if IsUpstreamStreamError(err) {
+			state.UpstreamError = err
 		}
 		return []StreamFrame{{Event: event, Data: append([]byte(nil), data...)}}, nil
 	}
@@ -198,6 +220,9 @@ func normalizeStreamEvent(event string, data []byte, upstream string) (normalize
 	}
 	switch upstream {
 	case router.ProtocolOpenAI:
+		if raw["error"] != nil {
+			return normalizedStreamEvent{}, newUpstreamStreamError("openai", streamErrorMessage(raw))
+		}
 		choice := firstMap(raw["choices"])
 		delta := asMap(choice["delta"])
 		text := contentText(delta["content"])
@@ -252,7 +277,7 @@ func normalizeStreamEvent(event string, data []byte, upstream string) (normalize
 			}
 			return normalizedStreamEvent{ID: stringField(response, "id"), Model: stringField(response, "model"), Finish: finish, Usage: responsesUsageFromMap(asMap(response["usage"])), Done: true, ResourceIDs: responseResourceIDsMap(response)}, nil
 		case "response.failed", "error":
-			return normalizedStreamEvent{}, fmt.Errorf("responses stream error: %s", stringOr(asMap(raw["error"])["message"], "upstream error"))
+			return normalizedStreamEvent{}, newUpstreamStreamError("responses", streamErrorMessage(raw))
 		default:
 			return normalizedStreamEvent{}, nil
 		}
@@ -286,13 +311,13 @@ func normalizeStreamEvent(event string, data []byte, upstream string) (normalize
 		case "ping", "content_block_stop":
 			return normalizedStreamEvent{}, nil
 		case "error":
-			return normalizedStreamEvent{}, fmt.Errorf("anthropic stream error: %s", contentText(raw["error"]))
+			return normalizedStreamEvent{}, newUpstreamStreamError("anthropic", streamErrorMessage(raw))
 		default:
 			return normalizedStreamEvent{}, nil
 		}
 	case router.ProtocolGemini:
 		if errBody := asMap(raw["error"]); len(errBody) > 0 {
-			return normalizedStreamEvent{}, fmt.Errorf("gemini stream error: %s", stringOr(errBody["message"], "upstream error"))
+			return normalizedStreamEvent{}, newUpstreamStreamError("gemini", streamErrorMessage(raw))
 		}
 		candidate := firstMap(raw["candidates"])
 		content := asMap(candidate["content"])
@@ -307,6 +332,18 @@ func normalizeStreamEvent(event string, data []byte, upstream string) (normalize
 	default:
 		return normalizedStreamEvent{}, fmt.Errorf("unsupported upstream stream protocol %q", upstream)
 	}
+}
+
+func streamErrorMessage(raw map[string]any) string {
+	for _, body := range []map[string]any{asMap(raw["error"]), asMap(asMap(raw["response"])["error"])} {
+		if message := stringField(body, "message"); message != "" {
+			return message
+		}
+	}
+	if message, ok := raw["error"].(string); ok && message != "" {
+		return message
+	}
+	return "upstream error"
 }
 
 func updateStreamState(state *StreamState, event normalizedStreamEvent) error {

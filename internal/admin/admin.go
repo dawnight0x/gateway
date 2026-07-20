@@ -638,6 +638,10 @@ func (s *Service) providers(w http.ResponseWriter, r *http.Request, parts []stri
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
 			return
 		}
+		if err := s.validateProviderRouteAllowlist(r.Context(), p); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+			return
+		}
 		item, err := s.store.UpsertProvider(r.Context(), p)
 		if err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})

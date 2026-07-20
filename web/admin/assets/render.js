@@ -142,293 +142,296 @@ const _hoisted_100 = { class: "quick-fill" }
 const _hoisted_101 = { class: "form-actions" }
 const _hoisted_102 = { type: "submit" }
 const _hoisted_103 = { class: "provider-meta-grid" }
-const _hoisted_104 = { class: "model-inventory" }
-const _hoisted_105 = { class: "model-inventory-head" }
-const _hoisted_106 = { class: "model-inventory-title" }
-const _hoisted_107 = { class: "pill" }
-const _hoisted_108 = { key: 0 }
-const _hoisted_109 = { key: 1 }
-const _hoisted_110 = ["disabled", "onClick"]
-const _hoisted_111 = {
-  key: 0,
-  class: "model-chip-list"
-}
-const _hoisted_112 = {
-  key: 0,
-  class: "model-chip-more"
-}
-const _hoisted_113 = {
-  key: 1,
-  class: "test-error"
-}
-const _hoisted_114 = { key: 2 }
-const _hoisted_115 = {
-  key: 3,
-  class: "model-policy"
-}
-const _hoisted_116 = { class: "model-policy-head" }
-const _hoisted_117 = { class: "check model-policy-toggle" }
-const _hoisted_118 = ["checked", "onChange"]
-const _hoisted_119 = { class: "model-policy-toolbar" }
-const _hoisted_120 = ["value", "placeholder", "onInput"]
-const _hoisted_121 = ["onClick"]
-const _hoisted_122 = ["onClick"]
-const _hoisted_123 = ["onClick"]
-const _hoisted_124 = { class: "model-policy-summary" }
-const _hoisted_125 = {
-  key: 0,
-  class: "test-error"
-}
-const _hoisted_126 = { class: "model-policy-list" }
-const _hoisted_127 = ["checked", "onChange"]
-const _hoisted_128 = {
-  key: 0,
-  class: "flagship-tag"
-}
-const _hoisted_129 = { class: "model-policy-actions" }
-const _hoisted_130 = ["disabled", "onClick"]
-const _hoisted_131 = { class: "inline-form-heading" }
-const _hoisted_132 = {
+const _hoisted_104 = { class: "inline-form-heading" }
+const _hoisted_105 = {
   key: 0,
   class: "form-error"
 }
-const _hoisted_133 = { class: "form-field" }
-const _hoisted_134 = ["value"]
-const _hoisted_135 = { class: "form-field" }
-const _hoisted_136 = ["placeholder"]
-const _hoisted_137 = { class: "form-field" }
-const _hoisted_138 = ["placeholder"]
-const _hoisted_139 = { class: "form-field" }
-const _hoisted_140 = ["placeholder"]
-const _hoisted_141 = { class: "model-select-field form-field" }
-const _hoisted_142 = { value: "" }
-const _hoisted_143 = ["value"]
-const _hoisted_144 = { class: "check" }
-const _hoisted_145 = { class: "form-actions" }
-const _hoisted_146 = { type: "submit" }
-const _hoisted_147 = {
+const _hoisted_106 = { class: "form-field" }
+const _hoisted_107 = ["value"]
+const _hoisted_108 = { class: "form-field" }
+const _hoisted_109 = ["placeholder"]
+const _hoisted_110 = { class: "form-field" }
+const _hoisted_111 = ["placeholder"]
+const _hoisted_112 = { class: "form-field" }
+const _hoisted_113 = ["placeholder"]
+const _hoisted_114 = { class: "model-select-field form-field" }
+const _hoisted_115 = { value: "" }
+const _hoisted_116 = ["value"]
+const _hoisted_117 = { class: "check" }
+const _hoisted_118 = { class: "form-actions" }
+const _hoisted_119 = { type: "submit" }
+const _hoisted_120 = {
   key: 2,
   class: "key-stack"
 }
-const _hoisted_148 = { class: "key-card-main" }
-const _hoisted_149 = { class: "key-title-row" }
-const _hoisted_150 = { class: "key-name" }
-const _hoisted_151 = { class: "pill" }
-const _hoisted_152 = {
+const _hoisted_121 = { class: "key-card-main" }
+const _hoisted_122 = { class: "key-title-row" }
+const _hoisted_123 = { class: "key-name" }
+const _hoisted_124 = { class: "pill" }
+const _hoisted_125 = {
   key: 0,
   class: "pill ok"
 }
-const _hoisted_153 = { class: "key-hint" }
-const _hoisted_154 = { class: "inline-form-heading" }
-const _hoisted_155 = ["title"]
-const _hoisted_156 = {
+const _hoisted_126 = { class: "key-hint" }
+const _hoisted_127 = { class: "inline-form-heading" }
+const _hoisted_128 = ["title"]
+const _hoisted_129 = {
   key: 0,
   class: "form-error"
 }
-const _hoisted_157 = ["value"]
-const _hoisted_158 = ["placeholder"]
-const _hoisted_159 = ["placeholder"]
-const _hoisted_160 = ["placeholder"]
-const _hoisted_161 = { class: "model-select-field" }
-const _hoisted_162 = { value: "" }
-const _hoisted_163 = ["value"]
-const _hoisted_164 = { class: "check" }
-const _hoisted_165 = { class: "form-actions" }
-const _hoisted_166 = { type: "submit" }
-const _hoisted_167 = { class: "key-test-row" }
-const _hoisted_168 = ["onClick", "disabled"]
-const _hoisted_169 = {
+const _hoisted_130 = ["value"]
+const _hoisted_131 = ["placeholder"]
+const _hoisted_132 = ["placeholder"]
+const _hoisted_133 = ["placeholder"]
+const _hoisted_134 = { class: "model-select-field" }
+const _hoisted_135 = { value: "" }
+const _hoisted_136 = ["value"]
+const _hoisted_137 = { class: "check" }
+const _hoisted_138 = { class: "model-inventory key-model-management" }
+const _hoisted_139 = { class: "model-inventory-head" }
+const _hoisted_140 = { class: "model-inventory-title" }
+const _hoisted_141 = { class: "pill" }
+const _hoisted_142 = { key: 0 }
+const _hoisted_143 = { key: 1 }
+const _hoisted_144 = ["disabled", "onClick"]
+const _hoisted_145 = {
+  key: 0,
+  class: "model-chip-list"
+}
+const _hoisted_146 = {
+  key: 0,
+  class: "model-chip-more"
+}
+const _hoisted_147 = {
+  key: 1,
+  class: "test-error"
+}
+const _hoisted_148 = { key: 2 }
+const _hoisted_149 = {
+  key: 3,
+  class: "model-policy"
+}
+const _hoisted_150 = { class: "model-policy-head" }
+const _hoisted_151 = { class: "check model-policy-toggle" }
+const _hoisted_152 = ["checked", "onChange"]
+const _hoisted_153 = { class: "model-policy-picker" }
+const _hoisted_154 = { class: "model-policy-picker-label" }
+const _hoisted_155 = { class: "model-policy-picker-panel" }
+const _hoisted_156 = { class: "model-policy-toolbar" }
+const _hoisted_157 = ["value", "placeholder", "onInput"]
+const _hoisted_158 = ["onClick"]
+const _hoisted_159 = ["onClick"]
+const _hoisted_160 = ["onClick"]
+const _hoisted_161 = { class: "model-policy-list" }
+const _hoisted_162 = ["checked", "onChange"]
+const _hoisted_163 = {
+  key: 0,
+  class: "model-policy-empty"
+}
+const _hoisted_164 = {
+  key: 0,
+  class: "test-error"
+}
+const _hoisted_165 = { class: "model-policy-actions" }
+const _hoisted_166 = ["disabled", "onClick"]
+const _hoisted_167 = { class: "form-actions" }
+const _hoisted_168 = { type: "submit" }
+const _hoisted_169 = { class: "key-test-row" }
+const _hoisted_170 = ["onClick", "disabled"]
+const _hoisted_171 = {
   key: 2,
   class: "test-error"
 }
-const _hoisted_170 = { class: "actions key-actions" }
-const _hoisted_171 = ["onClick"]
-const _hoisted_172 = ["onClick"]
+const _hoisted_172 = { class: "actions key-actions" }
 const _hoisted_173 = ["onClick"]
 const _hoisted_174 = ["onClick"]
 const _hoisted_175 = ["onClick"]
-const _hoisted_176 = {
+const _hoisted_176 = ["onClick"]
+const _hoisted_177 = ["onClick"]
+const _hoisted_178 = {
   key: 3,
   class: "empty-state compact-empty provider-empty"
 }
-const _hoisted_177 = ["onClick"]
-const _hoisted_178 = {
+const _hoisted_179 = ["onClick"]
+const _hoisted_180 = {
   key: 0,
   class: "empty-state compact-empty"
 }
-const _hoisted_179 = { class: "balance-header" }
-const _hoisted_180 = ["disabled"]
-const _hoisted_181 = {
+const _hoisted_181 = { class: "balance-header" }
+const _hoisted_182 = ["disabled"]
+const _hoisted_183 = {
   key: 1,
   class: "compact-list balance-result-list"
 }
-const _hoisted_182 = { class: "entity-label" }
-const _hoisted_183 = ["title"]
-const _hoisted_184 = { class: "table-wrap balance-table-wrap" }
-const _hoisted_185 = { class: "entity-label" }
-const _hoisted_186 = ["title"]
+const _hoisted_184 = { class: "entity-label" }
+const _hoisted_185 = ["title"]
+const _hoisted_186 = { class: "table-wrap balance-table-wrap" }
 const _hoisted_187 = { class: "entity-label" }
 const _hoisted_188 = ["title"]
-const _hoisted_189 = { key: 0 }
-const _hoisted_190 = { colspan: "6" }
-const _hoisted_191 = { class: "empty-state compact-empty" }
-const _hoisted_192 = { class: "section" }
-const _hoisted_193 = { class: "panel model-routing-panel" }
-const _hoisted_194 = { class: "panel-title section-actions model-routing-heading" }
-const _hoisted_195 = { class: "model-route-editor-head" }
-const _hoisted_196 = { class: "check" }
-const _hoisted_197 = {
+const _hoisted_189 = { class: "entity-label" }
+const _hoisted_190 = ["title"]
+const _hoisted_191 = { key: 0 }
+const _hoisted_192 = { colspan: "6" }
+const _hoisted_193 = { class: "empty-state compact-empty" }
+const _hoisted_194 = { class: "section" }
+const _hoisted_195 = { class: "panel model-routing-panel" }
+const _hoisted_196 = { class: "panel-title section-actions model-routing-heading" }
+const _hoisted_197 = { class: "model-route-editor-head" }
+const _hoisted_198 = { class: "check" }
+const _hoisted_199 = {
   key: 0,
   class: "form-error"
 }
-const _hoisted_198 = { class: "model-route-identity" }
-const _hoisted_199 = ["disabled"]
-const _hoisted_200 = { class: "route-model-list" }
-const _hoisted_201 = { class: "route-model-main" }
-const _hoisted_202 = { class: "route-order" }
-const _hoisted_203 = ["onUpdate:modelValue"]
-const _hoisted_204 = { class: "priority-field" }
+const _hoisted_200 = { class: "model-route-identity" }
+const _hoisted_201 = ["disabled"]
+const _hoisted_202 = { class: "route-model-list" }
+const _hoisted_203 = { class: "route-model-main" }
+const _hoisted_204 = { class: "route-order" }
 const _hoisted_205 = ["onUpdate:modelValue"]
-const _hoisted_206 = { class: "check" }
+const _hoisted_206 = { class: "priority-field" }
 const _hoisted_207 = ["onUpdate:modelValue"]
-const _hoisted_208 = ["aria-label", "title", "onClick"]
-const _hoisted_209 = { class: "route-target-list" }
-const _hoisted_210 = ["onUpdate:modelValue", "aria-label"]
-const _hoisted_211 = {
+const _hoisted_208 = { class: "check" }
+const _hoisted_209 = ["onUpdate:modelValue"]
+const _hoisted_210 = ["aria-label", "title", "onClick"]
+const _hoisted_211 = { class: "route-target-list" }
+const _hoisted_212 = ["onUpdate:modelValue", "aria-label"]
+const _hoisted_213 = {
   value: "",
   disabled: ""
 }
-const _hoisted_212 = ["value", "disabled"]
-const _hoisted_213 = ["onUpdate:modelValue", "list", "aria-label", "placeholder"]
-const _hoisted_214 = ["id"]
-const _hoisted_215 = ["value"]
-const _hoisted_216 = { class: "check" }
-const _hoisted_217 = ["onUpdate:modelValue"]
-const _hoisted_218 = ["aria-label", "title", "onClick"]
-const _hoisted_219 = ["onClick"]
-const _hoisted_220 = { class: "form-actions model-route-actions" }
-const _hoisted_221 = { type: "submit" }
-const _hoisted_222 = {
+const _hoisted_214 = ["value", "disabled"]
+const _hoisted_215 = ["onUpdate:modelValue", "list", "aria-label", "placeholder"]
+const _hoisted_216 = ["id"]
+const _hoisted_217 = ["value"]
+const _hoisted_218 = { class: "check" }
+const _hoisted_219 = ["onUpdate:modelValue"]
+const _hoisted_220 = ["aria-label", "title", "onClick"]
+const _hoisted_221 = ["onClick"]
+const _hoisted_222 = { class: "form-actions model-route-actions" }
+const _hoisted_223 = { type: "submit" }
+const _hoisted_224 = {
   key: 1,
   class: "model-route-list"
 }
-const _hoisted_223 = { class: "model-route-summary" }
-const _hoisted_224 = { class: "provider-title-row" }
-const _hoisted_225 = { class: "provider-actions" }
-const _hoisted_226 = ["onClick"]
-const _hoisted_227 = ["onClick"]
+const _hoisted_225 = { class: "model-route-summary" }
+const _hoisted_226 = { class: "provider-title-row" }
+const _hoisted_227 = { class: "provider-actions" }
 const _hoisted_228 = ["onClick"]
-const _hoisted_229 = { class: "route-ladder" }
-const _hoisted_230 = { class: "route-order" }
-const _hoisted_231 = { class: "route-ladder-model" }
-const _hoisted_232 = { class: "route-target-chips" }
-const _hoisted_233 = { key: 0 }
-const _hoisted_234 = ["title", "onClick"]
-const _hoisted_235 = {
+const _hoisted_229 = ["onClick"]
+const _hoisted_230 = ["onClick"]
+const _hoisted_231 = { class: "route-ladder" }
+const _hoisted_232 = { class: "route-order" }
+const _hoisted_233 = { class: "route-ladder-model" }
+const _hoisted_234 = { class: "route-target-chips" }
+const _hoisted_235 = { key: 0 }
+const _hoisted_236 = { key: 1 }
+const _hoisted_237 = ["title", "onClick"]
+const _hoisted_238 = {
   key: 2,
   class: "empty-state compact-empty"
 }
-const _hoisted_236 = { class: "section" }
-const _hoisted_237 = { class: "panel" }
-const _hoisted_238 = { class: "flow-hint" }
-const _hoisted_239 = ["placeholder"]
-const _hoisted_240 = { class: "form-actions" }
-const _hoisted_241 = { type: "submit" }
-const _hoisted_242 = {
+const _hoisted_239 = { class: "section" }
+const _hoisted_240 = { class: "panel" }
+const _hoisted_241 = { class: "flow-hint" }
+const _hoisted_242 = ["placeholder"]
+const _hoisted_243 = { class: "form-actions" }
+const _hoisted_244 = { type: "submit" }
+const _hoisted_245 = {
   key: 0,
   class: "flow-hint"
 }
-const _hoisted_243 = { class: "key-hint" }
-const _hoisted_244 = { class: "flow-hint" }
-const _hoisted_245 = {
+const _hoisted_246 = { class: "key-hint" }
+const _hoisted_247 = { class: "flow-hint" }
+const _hoisted_248 = {
   key: 1,
   class: "empty-state compact-empty"
 }
-const _hoisted_246 = {
+const _hoisted_249 = {
   key: 2,
   class: "table-wrap"
 }
-const _hoisted_247 = { class: "key-hint" }
-const _hoisted_248 = { class: "actions" }
-const _hoisted_249 = ["onClick"]
-const _hoisted_250 = ["onClick"]
-const _hoisted_251 = ["onClick"]
-const _hoisted_252 = { class: "section" }
-const _hoisted_253 = { class: "panel" }
-const _hoisted_254 = { class: "routing-section" }
-const _hoisted_255 = { class: "routing-section-heading" }
-const _hoisted_256 = { class: "routing-fields" }
-const _hoisted_257 = { class: "check" }
-const _hoisted_258 = { class: "check" }
-const _hoisted_259 = { class: "routing-advanced-toggle" }
-const _hoisted_260 = ["aria-expanded"]
-const _hoisted_261 = {
+const _hoisted_250 = { class: "key-hint" }
+const _hoisted_251 = { class: "actions" }
+const _hoisted_252 = ["onClick"]
+const _hoisted_253 = ["onClick"]
+const _hoisted_254 = ["onClick"]
+const _hoisted_255 = { class: "section" }
+const _hoisted_256 = { class: "panel" }
+const _hoisted_257 = { class: "routing-section" }
+const _hoisted_258 = { class: "routing-section-heading" }
+const _hoisted_259 = { class: "routing-fields" }
+const _hoisted_260 = { class: "check" }
+const _hoisted_261 = { class: "check" }
+const _hoisted_262 = { class: "routing-advanced-toggle" }
+const _hoisted_263 = ["aria-expanded"]
+const _hoisted_264 = {
   key: 0,
   id: "routing-advanced",
   class: "routing-section routing-advanced-section"
 }
-const _hoisted_262 = { class: "routing-section-heading" }
-const _hoisted_263 = { class: "routing-fields" }
-const _hoisted_264 = { class: "routing-risk" }
-const _hoisted_265 = { class: "check" }
-const _hoisted_266 = { class: "check" }
-const _hoisted_267 = { class: "form-actions" }
-const _hoisted_268 = { type: "submit" }
-const _hoisted_269 = {
+const _hoisted_265 = { class: "routing-section-heading" }
+const _hoisted_266 = { class: "routing-fields" }
+const _hoisted_267 = { class: "routing-risk" }
+const _hoisted_268 = { class: "check" }
+const _hoisted_269 = { class: "check" }
+const _hoisted_270 = { class: "form-actions" }
+const _hoisted_271 = { type: "submit" }
+const _hoisted_272 = {
   key: 0,
   class: "form-success",
   role: "status"
 }
-const _hoisted_270 = { class: "panel-title maintenance-actions" }
-const _hoisted_271 = { class: "panel-actions" }
-const _hoisted_272 = { type: "submit" }
-const _hoisted_273 = {
+const _hoisted_273 = { class: "panel-title maintenance-actions" }
+const _hoisted_274 = { class: "panel-actions" }
+const _hoisted_275 = { type: "submit" }
+const _hoisted_276 = {
   key: 1,
   class: "form-success",
   role: "status"
 }
-const _hoisted_274 = { class: "section" }
-const _hoisted_275 = { class: "panel" }
-const _hoisted_276 = { class: "panel-title section-actions" }
-const _hoisted_277 = { class: "flow-hint" }
-const _hoisted_278 = { class: "snippet-grid" }
-const _hoisted_279 = { class: "snippet-head" }
-const _hoisted_280 = ["onClick"]
-const _hoisted_281 = { class: "section" }
-const _hoisted_282 = { class: "panel" }
-const _hoisted_283 = { class: "log-toolbar" }
-const _hoisted_284 = ["aria-label", "placeholder"]
-const _hoisted_285 = ["aria-label"]
-const _hoisted_286 = { value: "" }
-const _hoisted_287 = ["aria-label"]
-const _hoisted_288 = { value: "" }
-const _hoisted_289 = ["value"]
-const _hoisted_290 = ["aria-label", "placeholder"]
-const _hoisted_291 = ["disabled"]
-const _hoisted_292 = { class: "table-wrap" }
-const _hoisted_293 = { class: "log-model-cell" }
-const _hoisted_294 = { key: 0 }
-const _hoisted_295 = { key: 1 }
-const _hoisted_296 = {
+const _hoisted_277 = { class: "section" }
+const _hoisted_278 = { class: "panel" }
+const _hoisted_279 = { class: "panel-title section-actions" }
+const _hoisted_280 = { class: "flow-hint" }
+const _hoisted_281 = { class: "snippet-grid" }
+const _hoisted_282 = { class: "snippet-head" }
+const _hoisted_283 = ["onClick"]
+const _hoisted_284 = { class: "section" }
+const _hoisted_285 = { class: "panel" }
+const _hoisted_286 = { class: "log-toolbar" }
+const _hoisted_287 = ["aria-label", "placeholder"]
+const _hoisted_288 = ["aria-label"]
+const _hoisted_289 = { value: "" }
+const _hoisted_290 = ["aria-label"]
+const _hoisted_291 = { value: "" }
+const _hoisted_292 = ["value"]
+const _hoisted_293 = ["aria-label", "placeholder"]
+const _hoisted_294 = ["disabled"]
+const _hoisted_295 = { class: "table-wrap" }
+const _hoisted_296 = { class: "log-model-cell" }
+const _hoisted_297 = { key: 0 }
+const _hoisted_298 = { key: 1 }
+const _hoisted_299 = {
   key: 2,
   class: "log-attempt-trace"
 }
-const _hoisted_297 = { key: 0 }
-const _hoisted_298 = { class: "pagination" }
-const _hoisted_299 = ["disabled"]
-const _hoisted_300 = ["disabled"]
+const _hoisted_300 = { key: 0 }
+const _hoisted_301 = { class: "pagination" }
+const _hoisted_302 = ["disabled"]
+const _hoisted_303 = ["disabled"]
 
 window.gatewayRender = function render(_ctx, _cache) {
   return (_openBlock(), _createElementBlock(_Fragment, null, [
     _createElementVNode("aside", _hoisted_1, [
       _createElementVNode("div", _hoisted_2, [
-        _cache[100] || (_cache[100] = _createElementVNode("img", {
+        _cache[101] || (_cache[101] = _createElementVNode("img", {
           class: "brand-mark",
           src: "/admin/assets/app-icon.svg",
           alt: ""
         }, null, -1 /* CACHED */)),
         _createElementVNode("div", null, [
-          _cache[99] || (_cache[99] = _createElementVNode("strong", null, "Local AI Gateway", -1 /* CACHED */)),
+          _cache[100] || (_cache[100] = _createElementVNode("strong", null, "Local AI Gateway", -1 /* CACHED */)),
           _createElementVNode("small", null, "localhost:" + _toDisplayString(_ctx.port), 1 /* TEXT */)
         ])
       ]),
@@ -505,7 +508,7 @@ window.gatewayRender = function render(_ctx, _cache) {
             _createElementVNode("h2", null, _toDisplayString(_ctx.dashboard?.service?.proxyUrl || `http://localhost:${_ctx.port}`), 1 /* TEXT */),
             _createElementVNode("p", null, _toDisplayString(_ctx.t('dashboard.gatewayCopy')), 1 /* TEXT */)
           ]),
-          _cache[101] || (_cache[101] = _createElementVNode("div", { class: "protocol-strip" }, [
+          _cache[102] || (_cache[102] = _createElementVNode("div", { class: "protocol-strip" }, [
             _createElementVNode("span", null, "OpenAI"),
             _createElementVNode("span", null, "Anthropic"),
             _createElementVNode("span", null, "Gemini")
@@ -574,7 +577,7 @@ window.gatewayRender = function render(_ctx, _cache) {
                   class: _normalizeClass(['log-row', 'traffic-row', _ctx.logStatusClass(log.status)])
                 }, [
                   _createElementVNode("span", _hoisted_27, _toDisplayString(_ctx.logStatusLabel(log.status)), 1 /* TEXT */),
-                  _cache[102] || (_cache[102] = _createElementVNode("span", {
+                  _cache[103] || (_cache[103] = _createElementVNode("span", {
                     class: "traffic-marker",
                     "aria-hidden": "true"
                   }, null, -1 /* CACHED */)),
@@ -1077,116 +1080,6 @@ window.gatewayRender = function render(_ctx, _cache) {
                     _createElementVNode("code", null, _toDisplayString(_ctx.providerApiEndpoint(p)), 1 /* TEXT */)
                   ])
                 ]),
-                _createElementVNode("div", _hoisted_104, [
-                  _createElementVNode("div", _hoisted_105, [
-                    _createElementVNode("div", null, [
-                      _createElementVNode("div", _hoisted_106, [
-                        _createElementVNode("strong", null, _toDisplayString(_ctx.t('model.inventory')), 1 /* TEXT */),
-                        _createElementVNode("span", {
-                          class: _normalizeClass(['pill', _ctx.discoveryStatusClass(p.id)])
-                        }, _toDisplayString(_ctx.discoveryStatusText(p.id)), 3 /* TEXT, CLASS */),
-                        _createElementVNode("span", _hoisted_107, _toDisplayString(_ctx.providerDiscoveredModels(p.id).length), 1 /* TEXT */)
-                      ]),
-                      (_ctx.discoveryForProvider(p.id).lastSuccessAt)
-                        ? (_openBlock(), _createElementBlock("small", _hoisted_108, _toDisplayString(_ctx.t('model.lastDiscovered')) + " " + _toDisplayString(_ctx.formatGatewayTime(_ctx.discoveryForProvider(p.id).lastSuccessAt)), 1 /* TEXT */))
-                        : (_openBlock(), _createElementBlock("small", _hoisted_109, _toDisplayString(_ctx.t('model.notDiscovered')), 1 /* TEXT */))
-                    ]),
-                    _createElementVNode("button", {
-                      class: "ghost",
-                      type: "button",
-                      disabled: _ctx.refreshingProviderId === p.id || !_ctx.providerKeys(p.id).length,
-                      onClick: $event => (_ctx.refreshProviderModels(p))
-                    }, _toDisplayString(_ctx.refreshingProviderId === p.id ? _ctx.t('action.discoveringModels') : _ctx.t('action.refreshModels')), 9 /* TEXT, PROPS */, _hoisted_110)
-                  ]),
-                  (_ctx.providerModelPreview(p.id).length)
-                    ? (_openBlock(), _createElementBlock("div", _hoisted_111, [
-                        (_openBlock(true), _createElementBlock(_Fragment, null, _renderList(_ctx.providerModelPreview(p.id), (model) => {
-                          return (_openBlock(), _createElementBlock("code", {
-                            key: model,
-                            class: "model-chip"
-                          }, _toDisplayString(model), 1 /* TEXT */))
-                        }), 128 /* KEYED_FRAGMENT */)),
-                        (_ctx.providerDiscoveredModels(p.id).length > _ctx.providerModelPreview(p.id).length)
-                          ? (_openBlock(), _createElementBlock("span", _hoisted_112, "+" + _toDisplayString(_ctx.providerDiscoveredModels(p.id).length - _ctx.providerModelPreview(p.id).length), 1 /* TEXT */))
-                          : _createCommentVNode("v-if", true)
-                      ]))
-                    : (_ctx.discoveryForProvider(p.id).lastError)
-                      ? (_openBlock(), _createElementBlock("small", _hoisted_113, _toDisplayString(_ctx.discoveryForProvider(p.id).lastError), 1 /* TEXT */))
-                      : (_openBlock(), _createElementBlock("small", _hoisted_114, _toDisplayString(_ctx.t('model.inventoryEmpty')), 1 /* TEXT */)),
-                  (_ctx.providerModelPolicyOptions(p.id).length)
-                    ? (_openBlock(), _createElementBlock("div", _hoisted_115, [
-                        _createElementVNode("div", _hoisted_116, [
-                          _createElementVNode("div", null, [
-                            _createElementVNode("strong", null, _toDisplayString(_ctx.t('model.policyTitle')), 1 /* TEXT */),
-                            _createElementVNode("small", null, _toDisplayString(_ctx.t('model.policyCopy')), 1 /* TEXT */)
-                          ]),
-                          _createElementVNode("label", _hoisted_117, [
-                            _createElementVNode("input", {
-                              type: "checkbox",
-                              checked: _ctx.modelPolicyDraft(p.id).enabled,
-                              onChange: $event => (_ctx.setModelPolicyEnabled(p.id, $event.target.checked))
-                            }, null, 40 /* PROPS, NEED_HYDRATION */, _hoisted_118),
-                            _createTextVNode(" " + _toDisplayString(_ctx.t('model.policyEnabled')), 1 /* TEXT */)
-                          ])
-                        ]),
-                        _createElementVNode("div", _hoisted_119, [
-                          _createElementVNode("input", {
-                            value: _ctx.modelPolicySearch[p.id] || '',
-                            type: "search",
-                            placeholder: _ctx.t('model.search'),
-                            onInput: $event => (_ctx.modelPolicySearch[p.id] = $event.target.value)
-                          }, null, 40 /* PROPS, NEED_HYDRATION */, _hoisted_120),
-                          _createElementVNode("button", {
-                            class: "ghost",
-                            type: "button",
-                            onClick: $event => (_ctx.selectProviderModels(p.id, 'all'))
-                          }, _toDisplayString(_ctx.t('model.selectAll')), 9 /* TEXT, PROPS */, _hoisted_121),
-                          _createElementVNode("button", {
-                            class: "ghost flagship-action",
-                            type: "button",
-                            onClick: $event => (_ctx.selectProviderModels(p.id, 'flagship'))
-                          }, _toDisplayString(_ctx.t('model.selectFlagship')), 9 /* TEXT, PROPS */, _hoisted_122),
-                          _createElementVNode("button", {
-                            class: "ghost",
-                            type: "button",
-                            onClick: $event => (_ctx.selectProviderModels(p.id, 'clear'))
-                          }, _toDisplayString(_ctx.t('model.clearSelection')), 9 /* TEXT, PROPS */, _hoisted_123)
-                        ]),
-                        _createElementVNode("div", _hoisted_124, [
-                          _createElementVNode("small", null, _toDisplayString(_ctx.t('model.selectedCount', { selected: _ctx.modelPolicyDraft(p.id).models.length, total: _ctx.providerModelPolicyOptions(p.id).length })), 1 /* TEXT */),
-                          (_ctx.modelPolicyDraft(p.id).enabled && !_ctx.modelPolicyDraft(p.id).models.length)
-                            ? (_openBlock(), _createElementBlock("small", _hoisted_125, _toDisplayString(_ctx.t('model.emptyPolicyWarning')), 1 /* TEXT */))
-                            : _createCommentVNode("v-if", true)
-                        ]),
-                        _createElementVNode("div", _hoisted_126, [
-                          (_openBlock(true), _createElementBlock(_Fragment, null, _renderList(_ctx.filteredProviderModelPolicyOptions(p.id), (model) => {
-                            return (_openBlock(), _createElementBlock("label", {
-                              key: model,
-                              class: _normalizeClass(['model-policy-item', {recommended: _ctx.isFlagshipModel(model)}])
-                            }, [
-                              _createElementVNode("input", {
-                                type: "checkbox",
-                                checked: _ctx.modelPolicySelected(p.id, model),
-                                onChange: $event => (_ctx.setProviderModelSelected(p.id, model, $event.target.checked))
-                              }, null, 40 /* PROPS, NEED_HYDRATION */, _hoisted_127),
-                              _createElementVNode("code", null, _toDisplayString(model), 1 /* TEXT */),
-                              (_ctx.isFlagshipModel(model))
-                                ? (_openBlock(), _createElementBlock("span", _hoisted_128, _toDisplayString(_ctx.t('model.flagship')), 1 /* TEXT */))
-                                : _createCommentVNode("v-if", true)
-                            ], 2 /* CLASS */))
-                          }), 128 /* KEYED_FRAGMENT */))
-                        ]),
-                        _createElementVNode("div", _hoisted_129, [
-                          _createElementVNode("small", null, _toDisplayString(_ctx.modelPolicyDraft(p.id).enabled ? _ctx.t('model.policyActiveHint') : _ctx.t('model.policyInactiveHint')), 1 /* TEXT */),
-                          _createElementVNode("button", {
-                            type: "button",
-                            disabled: !_ctx.modelPolicyDraft(p.id).dirty || _ctx.modelPolicySavingProviderId === p.id,
-                            onClick: $event => (_ctx.saveProviderModelPolicy(p))
-                          }, _toDisplayString(_ctx.modelPolicySavingProviderId === p.id ? _ctx.t('action.saving') : _ctx.t('action.saveModelPolicy')), 9 /* TEXT, PROPS */, _hoisted_130)
-                        ])
-                      ]))
-                    : _createCommentVNode("v-if", true)
-                ]),
                 (_ctx.keyFormOpen && !_ctx.keyForm.editingId && _ctx.keyForm.providerId === p.id)
                   ? (_openBlock(), _createElementBlock("form", {
                       key: 1,
@@ -1194,14 +1087,14 @@ window.gatewayRender = function render(_ctx, _cache) {
                       "data-testid": "key-form",
                       onSubmit: _cache[43] || (_cache[43] = _withModifiers((...args) => (_ctx.saveKey && _ctx.saveKey(...args)), ["prevent"]))
                     }, [
-                      _createElementVNode("div", _hoisted_131, [
+                      _createElementVNode("div", _hoisted_104, [
                         _createElementVNode("strong", null, _toDisplayString(_ctx.t('action.addKey')), 1 /* TEXT */),
                         _createElementVNode("small", null, _toDisplayString(_ctx.t('key.addCopy')) + " · " + _toDisplayString(p.name) + " · " + _toDisplayString(p.baseUrl), 1 /* TEXT */)
                       ]),
                       (_ctx.formError)
-                        ? (_openBlock(), _createElementBlock("div", _hoisted_132, _toDisplayString(_ctx.formError), 1 /* TEXT */))
+                        ? (_openBlock(), _createElementBlock("div", _hoisted_105, _toDisplayString(_ctx.formError), 1 /* TEXT */))
                         : _createCommentVNode("v-if", true),
-                      _createElementVNode("label", _hoisted_133, [
+                      _createElementVNode("label", _hoisted_106, [
                         _createElementVNode("span", null, _toDisplayString(_ctx.t('table.provider')), 1 /* TEXT */),
                         _withDirectives(_createElementVNode("select", {
                           "onUpdate:modelValue": _cache[36] || (_cache[36] = $event => ((_ctx.keyForm.providerId) = $event)),
@@ -1211,19 +1104,19 @@ window.gatewayRender = function render(_ctx, _cache) {
                             return (_openBlock(), _createElementBlock("option", {
                               key: provider.id,
                               value: provider.id
-                            }, _toDisplayString(provider.name) + " (" + _toDisplayString(provider.id) + ")", 9 /* TEXT, PROPS */, _hoisted_134))
+                            }, _toDisplayString(provider.name) + " (" + _toDisplayString(provider.id) + ")", 9 /* TEXT, PROPS */, _hoisted_107))
                           }), 128 /* KEYED_FRAGMENT */))
                         ], 512 /* NEED_PATCH */), [
                           [_vModelSelect, _ctx.keyForm.providerId]
                         ]),
                         _createElementVNode("small", null, _toDisplayString(_ctx.t('hint.keyProvider')), 1 /* TEXT */)
                       ]),
-                      _createElementVNode("label", _hoisted_135, [
+                      _createElementVNode("label", _hoisted_108, [
                         _createElementVNode("span", null, _toDisplayString(_ctx.t('field.keyName')), 1 /* TEXT */),
                         _withDirectives(_createElementVNode("input", {
                           "onUpdate:modelValue": _cache[37] || (_cache[37] = $event => ((_ctx.keyForm.name) = $event)),
                           placeholder: _ctx.t('placeholder.keyDisplayName')
-                        }, null, 8 /* PROPS */, _hoisted_136), [
+                        }, null, 8 /* PROPS */, _hoisted_109), [
                           [
                             _vModelText,
                             _ctx.keyForm.name,
@@ -1233,14 +1126,14 @@ window.gatewayRender = function render(_ctx, _cache) {
                         ]),
                         _createElementVNode("small", null, _toDisplayString(_ctx.t('hint.keyName')), 1 /* TEXT */)
                       ]),
-                      _createElementVNode("label", _hoisted_137, [
+                      _createElementVNode("label", _hoisted_110, [
                         _createElementVNode("span", null, _toDisplayString(_ctx.t('field.keySecret')), 1 /* TEXT */),
                         _withDirectives(_createElementVNode("input", {
                           "onUpdate:modelValue": _cache[38] || (_cache[38] = $event => ((_ctx.keyForm.secret) = $event)),
                           type: "password",
                           placeholder: _ctx.t('placeholder.secret'),
                           autocomplete: "off"
-                        }, null, 8 /* PROPS */, _hoisted_138), [
+                        }, null, 8 /* PROPS */, _hoisted_111), [
                           [
                             _vModelText,
                             _ctx.keyForm.secret,
@@ -1250,7 +1143,7 @@ window.gatewayRender = function render(_ctx, _cache) {
                         ]),
                         _createElementVNode("small", null, _toDisplayString(_ctx.t('hint.keySecret')), 1 /* TEXT */)
                       ]),
-                      _createElementVNode("label", _hoisted_139, [
+                      _createElementVNode("label", _hoisted_112, [
                         _createElementVNode("span", null, _toDisplayString(_ctx.t('field.keyPriority')), 1 /* TEXT */),
                         _withDirectives(_createElementVNode("input", {
                           "onUpdate:modelValue": _cache[39] || (_cache[39] = $event => ((_ctx.keyForm.priority) = $event)),
@@ -1258,7 +1151,7 @@ window.gatewayRender = function render(_ctx, _cache) {
                           min: "0",
                           max: "1000",
                           placeholder: _ctx.t('placeholder.priority')
-                        }, null, 8 /* PROPS */, _hoisted_140), [
+                        }, null, 8 /* PROPS */, _hoisted_113), [
                           [
                             _vModelText,
                             _ctx.keyForm.priority,
@@ -1268,24 +1161,25 @@ window.gatewayRender = function render(_ctx, _cache) {
                         ]),
                         _createElementVNode("small", null, _toDisplayString(_ctx.t('hint.keyPriority')), 1 /* TEXT */)
                       ]),
-                      _createElementVNode("label", _hoisted_141, [
+                      _createElementVNode("label", _hoisted_114, [
                         _createElementVNode("span", null, _toDisplayString(_ctx.t('field.defaultModel')), 1 /* TEXT */),
                         _withDirectives(_createElementVNode("select", {
                           "onUpdate:modelValue": _cache[40] || (_cache[40] = $event => ((_ctx.keyForm.defaultModel) = $event))
                         }, [
-                          _createElementVNode("option", _hoisted_142, _toDisplayString(_ctx.t('model.useRequestDefault')), 1 /* TEXT */),
+                          _createElementVNode("option", _hoisted_115, _toDisplayString(_ctx.t('model.useRequestDefault')), 1 /* TEXT */),
                           (_openBlock(true), _createElementBlock(_Fragment, null, _renderList(_ctx.providerModelOptions(_ctx.keyForm.providerId), (model) => {
                             return (_openBlock(), _createElementBlock("option", {
                               key: model,
-                              value: model
-                            }, _toDisplayString(model), 9 /* TEXT, PROPS */, _hoisted_143))
+                              value: model,
+                              class: _normalizeClass({ 'flagship-option': _ctx.isFlagshipModel(model) })
+                            }, _toDisplayString(_ctx.modelOptionLabel(model)), 11 /* TEXT, CLASS, PROPS */, _hoisted_116))
                           }), 128 /* KEYED_FRAGMENT */))
                         ], 512 /* NEED_PATCH */), [
                           [_vModelSelect, _ctx.keyForm.defaultModel]
                         ]),
                         _createElementVNode("small", null, _toDisplayString(_ctx.t('model.keyHint')), 1 /* TEXT */)
                       ]),
-                      _createElementVNode("label", _hoisted_144, [
+                      _createElementVNode("label", _hoisted_117, [
                         _withDirectives(_createElementVNode("input", {
                           "onUpdate:modelValue": _cache[41] || (_cache[41] = $event => ((_ctx.keyForm.enabled) = $event)),
                           type: "checkbox"
@@ -1294,31 +1188,31 @@ window.gatewayRender = function render(_ctx, _cache) {
                         ]),
                         _createTextVNode(" " + _toDisplayString(_ctx.t('status.enabled')), 1 /* TEXT */)
                       ]),
-                      _createElementVNode("div", _hoisted_145, [
+                      _createElementVNode("div", _hoisted_118, [
                         _createElementVNode("button", {
                           class: "ghost",
                           type: "button",
                           "data-testid": "cancel-key",
                           onClick: _cache[42] || (_cache[42] = (...args) => (_ctx.cancelKeyForm && _ctx.cancelKeyForm(...args)))
                         }, _toDisplayString(_ctx.t('action.cancel')), 1 /* TEXT */),
-                        _createElementVNode("button", _hoisted_146, _toDisplayString(_ctx.t('action.saveKey')), 1 /* TEXT */)
+                        _createElementVNode("button", _hoisted_119, _toDisplayString(_ctx.t('action.saveKey')), 1 /* TEXT */)
                       ])
                     ], 32 /* NEED_HYDRATION */))
                   : _createCommentVNode("v-if", true),
                 (_ctx.providerKeys(p.id).length)
-                  ? (_openBlock(), _createElementBlock("div", _hoisted_147, [
+                  ? (_openBlock(), _createElementBlock("div", _hoisted_120, [
                       (_openBlock(true), _createElementBlock(_Fragment, null, _renderList(_ctx.providerKeys(p.id), (k) => {
                         return (_openBlock(), _createElementBlock("div", {
                           key: k.id,
                           class: "key-card"
                         }, [
-                          _createElementVNode("div", _hoisted_148, [
+                          _createElementVNode("div", _hoisted_121, [
                             _createElementVNode("div", null, [
-                              _createElementVNode("div", _hoisted_149, [
-                                _createElementVNode("strong", _hoisted_150, _toDisplayString(k.name || k.id), 1 /* TEXT */),
-                                _createElementVNode("span", _hoisted_151, _toDisplayString(_ctx.t('table.priority')) + " " + _toDisplayString(k.priority), 1 /* TEXT */),
+                              _createElementVNode("div", _hoisted_122, [
+                                _createElementVNode("strong", _hoisted_123, _toDisplayString(k.name || k.id), 1 /* TEXT */),
+                                _createElementVNode("span", _hoisted_124, _toDisplayString(_ctx.t('table.priority')) + " " + _toDisplayString(k.priority), 1 /* TEXT */),
                                 (k.manualPreferred)
-                                  ? (_openBlock(), _createElementBlock("span", _hoisted_152, _toDisplayString(_ctx.t('status.preferred')), 1 /* TEXT */))
+                                  ? (_openBlock(), _createElementBlock("span", _hoisted_125, _toDisplayString(_ctx.t('status.preferred')), 1 /* TEXT */))
                                   : _createCommentVNode("v-if", true),
                                 _createElementVNode("span", {
                                   class: _normalizeClass(['pill', k.enabled ? 'ok' : 'bad'])
@@ -1326,24 +1220,24 @@ window.gatewayRender = function render(_ctx, _cache) {
                               ]),
                               _createElementVNode("small", null, _toDisplayString(_ctx.t('provider.keyHealth', { ok: k.successCount || 0, fail: k.failureCount || 0 })), 1 /* TEXT */)
                             ]),
-                            _createElementVNode("code", _hoisted_153, _toDisplayString(k.keyHint), 1 /* TEXT */)
+                            _createElementVNode("code", _hoisted_126, _toDisplayString(k.keyHint), 1 /* TEXT */)
                           ]),
                           (_ctx.keyFormOpen && _ctx.keyForm.editingId === k.id)
                             ? (_openBlock(), _createElementBlock("form", {
                                 key: 0,
                                 class: "form-grid inline-edit-form key-inline-form",
                                 "data-testid": "key-form",
-                                onSubmit: _cache[51] || (_cache[51] = _withModifiers((...args) => (_ctx.saveKey && _ctx.saveKey(...args)), ["prevent"]))
+                                onSubmit: _cache[52] || (_cache[52] = _withModifiers((...args) => (_ctx.saveKey && _ctx.saveKey(...args)), ["prevent"]))
                               }, [
-                                _createElementVNode("div", _hoisted_154, [
+                                _createElementVNode("div", _hoisted_127, [
                                   _createElementVNode("strong", null, _toDisplayString(_ctx.t('action.editKey')), 1 /* TEXT */),
                                   _createElementVNode("small", {
                                     class: "key-edit-context",
                                     title: k.id
-                                  }, _toDisplayString(p.name) + " · " + _toDisplayString(_ctx.t('table.internalId')) + ": " + _toDisplayString(k.id), 9 /* TEXT, PROPS */, _hoisted_155)
+                                  }, _toDisplayString(p.name) + " · " + _toDisplayString(_ctx.t('table.internalId')) + ": " + _toDisplayString(k.id), 9 /* TEXT, PROPS */, _hoisted_128)
                                 ]),
                                 (_ctx.formError)
-                                  ? (_openBlock(), _createElementBlock("div", _hoisted_156, _toDisplayString(_ctx.formError), 1 /* TEXT */))
+                                  ? (_openBlock(), _createElementBlock("div", _hoisted_129, _toDisplayString(_ctx.formError), 1 /* TEXT */))
                                   : _createCommentVNode("v-if", true),
                                 _withDirectives(_createElementVNode("select", {
                                   "onUpdate:modelValue": _cache[44] || (_cache[44] = $event => ((_ctx.keyForm.providerId) = $event)),
@@ -1353,7 +1247,7 @@ window.gatewayRender = function render(_ctx, _cache) {
                                     return (_openBlock(), _createElementBlock("option", {
                                       key: provider.id,
                                       value: provider.id
-                                    }, _toDisplayString(provider.name) + " (" + _toDisplayString(provider.id) + ")", 9 /* TEXT, PROPS */, _hoisted_157))
+                                    }, _toDisplayString(provider.name) + " (" + _toDisplayString(provider.id) + ")", 9 /* TEXT, PROPS */, _hoisted_130))
                                   }), 128 /* KEYED_FRAGMENT */))
                                 ], 512 /* NEED_PATCH */), [
                                   [_vModelSelect, _ctx.keyForm.providerId]
@@ -1361,7 +1255,7 @@ window.gatewayRender = function render(_ctx, _cache) {
                                 _withDirectives(_createElementVNode("input", {
                                   "onUpdate:modelValue": _cache[45] || (_cache[45] = $event => ((_ctx.keyForm.name) = $event)),
                                   placeholder: _ctx.t('placeholder.keyDisplayName')
-                                }, null, 8 /* PROPS */, _hoisted_158), [
+                                }, null, 8 /* PROPS */, _hoisted_131), [
                                   [
                                     _vModelText,
                                     _ctx.keyForm.name,
@@ -1374,7 +1268,7 @@ window.gatewayRender = function render(_ctx, _cache) {
                                   type: "password",
                                   placeholder: _ctx.t('placeholder.secretKeep'),
                                   autocomplete: "off"
-                                }, null, 8 /* PROPS */, _hoisted_159), [
+                                }, null, 8 /* PROPS */, _hoisted_132), [
                                   [
                                     _vModelText,
                                     _ctx.keyForm.secret,
@@ -1388,7 +1282,7 @@ window.gatewayRender = function render(_ctx, _cache) {
                                   min: "0",
                                   max: "1000",
                                   placeholder: _ctx.t('placeholder.priority')
-                                }, null, 8 /* PROPS */, _hoisted_160), [
+                                }, null, 8 /* PROPS */, _hoisted_133), [
                                   [
                                     _vModelText,
                                     _ctx.keyForm.priority,
@@ -1396,23 +1290,24 @@ window.gatewayRender = function render(_ctx, _cache) {
                                     { number: true }
                                   ]
                                 ]),
-                                _createElementVNode("div", _hoisted_161, [
+                                _createElementVNode("div", _hoisted_134, [
                                   _withDirectives(_createElementVNode("select", {
                                     "onUpdate:modelValue": _cache[48] || (_cache[48] = $event => ((_ctx.keyForm.defaultModel) = $event))
                                   }, [
-                                    _createElementVNode("option", _hoisted_162, _toDisplayString(_ctx.t('model.useRequestDefault')), 1 /* TEXT */),
+                                    _createElementVNode("option", _hoisted_135, _toDisplayString(_ctx.t('model.useRequestDefault')), 1 /* TEXT */),
                                     (_openBlock(true), _createElementBlock(_Fragment, null, _renderList(_ctx.providerModelOptions(_ctx.keyForm.providerId), (model) => {
                                       return (_openBlock(), _createElementBlock("option", {
                                         key: model,
-                                        value: model
-                                      }, _toDisplayString(model), 9 /* TEXT, PROPS */, _hoisted_163))
+                                        value: model,
+                                        class: _normalizeClass({ 'flagship-option': _ctx.isFlagshipModel(model) })
+                                      }, _toDisplayString(_ctx.modelOptionLabel(model)), 11 /* TEXT, CLASS, PROPS */, _hoisted_136))
                                     }), 128 /* KEYED_FRAGMENT */))
                                   ], 512 /* NEED_PATCH */), [
                                     [_vModelSelect, _ctx.keyForm.defaultModel]
                                   ]),
                                   _createElementVNode("small", null, _toDisplayString(_ctx.t('model.keyHint')), 1 /* TEXT */)
                                 ]),
-                                _createElementVNode("label", _hoisted_164, [
+                                _createElementVNode("label", _hoisted_137, [
                                   _withDirectives(_createElementVNode("input", {
                                     "onUpdate:modelValue": _cache[49] || (_cache[49] = $event => ((_ctx.keyForm.enabled) = $event)),
                                     type: "checkbox"
@@ -1421,24 +1316,144 @@ window.gatewayRender = function render(_ctx, _cache) {
                                   ]),
                                   _createTextVNode(" " + _toDisplayString(_ctx.t('status.enabled')), 1 /* TEXT */)
                                 ]),
-                                _createElementVNode("div", _hoisted_165, [
+                                _createElementVNode("section", _hoisted_138, [
+                                  _createElementVNode("div", _hoisted_139, [
+                                    _createElementVNode("div", null, [
+                                      _createElementVNode("div", _hoisted_140, [
+                                        _createElementVNode("strong", null, _toDisplayString(_ctx.t('model.inventory')), 1 /* TEXT */),
+                                        _createElementVNode("span", {
+                                          class: _normalizeClass(['pill', _ctx.discoveryStatusClass(p.id)])
+                                        }, _toDisplayString(_ctx.discoveryStatusText(p.id)), 3 /* TEXT, CLASS */),
+                                        _createElementVNode("span", _hoisted_141, _toDisplayString(_ctx.providerDiscoveredModels(p.id).length), 1 /* TEXT */)
+                                      ]),
+                                      (_ctx.discoveryForProvider(p.id).lastSuccessAt)
+                                        ? (_openBlock(), _createElementBlock("small", _hoisted_142, _toDisplayString(_ctx.t('model.lastDiscovered')) + " " + _toDisplayString(_ctx.formatGatewayTime(_ctx.discoveryForProvider(p.id).lastSuccessAt)), 1 /* TEXT */))
+                                        : (_openBlock(), _createElementBlock("small", _hoisted_143, _toDisplayString(_ctx.t('model.notDiscovered')), 1 /* TEXT */))
+                                    ]),
+                                    _createElementVNode("button", {
+                                      class: "ghost",
+                                      type: "button",
+                                      disabled: _ctx.refreshingProviderId === p.id || !_ctx.providerKeys(p.id).length,
+                                      onClick: $event => (_ctx.refreshProviderModels(p))
+                                    }, _toDisplayString(_ctx.refreshingProviderId === p.id ? _ctx.t('action.discoveringModels') : _ctx.t('action.refreshModels')), 9 /* TEXT, PROPS */, _hoisted_144)
+                                  ]),
+                                  (_ctx.providerModelPreview(p.id).length)
+                                    ? (_openBlock(), _createElementBlock("div", _hoisted_145, [
+                                        (_openBlock(true), _createElementBlock(_Fragment, null, _renderList(_ctx.providerModelPreview(p.id), (model) => {
+                                          return (_openBlock(), _createElementBlock("code", {
+                                            key: model,
+                                            class: "model-chip"
+                                          }, _toDisplayString(model), 1 /* TEXT */))
+                                        }), 128 /* KEYED_FRAGMENT */)),
+                                        (_ctx.providerDiscoveredModels(p.id).length > _ctx.providerModelPreview(p.id).length)
+                                          ? (_openBlock(), _createElementBlock("span", _hoisted_146, "+" + _toDisplayString(_ctx.providerDiscoveredModels(p.id).length - _ctx.providerModelPreview(p.id).length), 1 /* TEXT */))
+                                          : _createCommentVNode("v-if", true)
+                                      ]))
+                                    : (_ctx.discoveryForProvider(p.id).lastError)
+                                      ? (_openBlock(), _createElementBlock("small", _hoisted_147, _toDisplayString(_ctx.discoveryForProvider(p.id).lastError), 1 /* TEXT */))
+                                      : (_openBlock(), _createElementBlock("small", _hoisted_148, _toDisplayString(_ctx.t('model.inventoryEmpty')), 1 /* TEXT */)),
+                                  (_ctx.providerModelPolicyOptions(p.id).length)
+                                    ? (_openBlock(), _createElementBlock("div", _hoisted_149, [
+                                        _createElementVNode("div", _hoisted_150, [
+                                          _createElementVNode("div", null, [
+                                            _createElementVNode("strong", null, _toDisplayString(_ctx.t('model.policyTitle')), 1 /* TEXT */),
+                                            _createElementVNode("small", null, _toDisplayString(_ctx.t('model.policyCopy')), 1 /* TEXT */)
+                                          ]),
+                                          _createElementVNode("label", _hoisted_151, [
+                                            _createElementVNode("input", {
+                                              type: "checkbox",
+                                              checked: _ctx.modelPolicyDraft(p.id).enabled,
+                                              onChange: $event => (_ctx.setModelPolicyEnabled(p.id, $event.target.checked))
+                                            }, null, 40 /* PROPS, NEED_HYDRATION */, _hoisted_152),
+                                            _createTextVNode(" " + _toDisplayString(_ctx.t('model.policyEnabled')), 1 /* TEXT */)
+                                          ])
+                                        ]),
+                                        _createElementVNode("details", _hoisted_153, [
+                                          _createElementVNode("summary", null, [
+                                            _createElementVNode("span", _hoisted_154, [
+                                              _createElementVNode("strong", null, _toDisplayString(_ctx.t('model.chooseModels')), 1 /* TEXT */),
+                                              _createElementVNode("small", null, _toDisplayString(_ctx.t('model.selectedCount', { selected: _ctx.modelPolicyDraft(p.id).models.length, total: _ctx.providerModelPolicyOptions(p.id).length })), 1 /* TEXT */)
+                                            ])
+                                          ]),
+                                          _createElementVNode("div", _hoisted_155, [
+                                            _createElementVNode("div", _hoisted_156, [
+                                              _createElementVNode("input", {
+                                                value: _ctx.modelPolicySearch[p.id] || '',
+                                                type: "search",
+                                                placeholder: _ctx.t('model.search'),
+                                                onInput: $event => (_ctx.modelPolicySearch[p.id] = $event.target.value),
+                                                onKeydown: _cache[50] || (_cache[50] = _withKeys(_withModifiers(() => {}, ["prevent"]), ["enter"]))
+                                              }, null, 40 /* PROPS, NEED_HYDRATION */, _hoisted_157),
+                                              _createElementVNode("button", {
+                                                class: "ghost",
+                                                type: "button",
+                                                onClick: $event => (_ctx.selectProviderModels(p.id, 'all'))
+                                              }, _toDisplayString(_ctx.t('model.selectAll')), 9 /* TEXT, PROPS */, _hoisted_158),
+                                              _createElementVNode("button", {
+                                                class: "ghost flagship-action",
+                                                type: "button",
+                                                onClick: $event => (_ctx.selectProviderModels(p.id, 'flagship'))
+                                              }, _toDisplayString(_ctx.t('model.selectFlagship')), 9 /* TEXT, PROPS */, _hoisted_159),
+                                              _createElementVNode("button", {
+                                                class: "ghost",
+                                                type: "button",
+                                                onClick: $event => (_ctx.selectProviderModels(p.id, 'clear'))
+                                              }, _toDisplayString(_ctx.t('model.clearSelection')), 9 /* TEXT, PROPS */, _hoisted_160)
+                                            ]),
+                                            _createElementVNode("div", _hoisted_161, [
+                                              (_openBlock(true), _createElementBlock(_Fragment, null, _renderList(_ctx.filteredProviderModelPolicyOptions(p.id), (model) => {
+                                                return (_openBlock(), _createElementBlock("label", {
+                                                  key: model,
+                                                  class: "model-policy-item"
+                                                }, [
+                                                  _createElementVNode("input", {
+                                                    type: "checkbox",
+                                                    checked: _ctx.modelPolicySelected(p.id, model),
+                                                    onChange: $event => (_ctx.setProviderModelSelected(p.id, model, $event.target.checked))
+                                                  }, null, 40 /* PROPS, NEED_HYDRATION */, _hoisted_162),
+                                                  _createElementVNode("code", {
+                                                    class: _normalizeClass({ 'flagship-option': _ctx.isFlagshipModel(model) })
+                                                  }, _toDisplayString(_ctx.modelOptionLabel(model)), 3 /* TEXT, CLASS */)
+                                                ]))
+                                              }), 128 /* KEYED_FRAGMENT */)),
+                                              (!_ctx.filteredProviderModelPolicyOptions(p.id).length)
+                                                ? (_openBlock(), _createElementBlock("small", _hoisted_163, _toDisplayString(_ctx.t('model.noMatches')), 1 /* TEXT */))
+                                                : _createCommentVNode("v-if", true)
+                                            ])
+                                          ])
+                                        ]),
+                                        (_ctx.modelPolicyDraft(p.id).enabled && !_ctx.modelPolicyDraft(p.id).models.length)
+                                          ? (_openBlock(), _createElementBlock("small", _hoisted_164, _toDisplayString(_ctx.t('model.emptyPolicyWarning')), 1 /* TEXT */))
+                                          : _createCommentVNode("v-if", true),
+                                        _createElementVNode("div", _hoisted_165, [
+                                          _createElementVNode("small", null, _toDisplayString(_ctx.modelPolicyDraft(p.id).enabled ? _ctx.t('model.policyActiveHint') : _ctx.t('model.policyInactiveHint')), 1 /* TEXT */),
+                                          _createElementVNode("button", {
+                                            type: "button",
+                                            disabled: !_ctx.modelPolicyDraft(p.id).dirty || _ctx.modelPolicySavingProviderId === p.id,
+                                            onClick: $event => (_ctx.saveProviderModelPolicy(p))
+                                          }, _toDisplayString(_ctx.modelPolicySavingProviderId === p.id ? _ctx.t('action.saving') : _ctx.t('action.saveModelPolicy')), 9 /* TEXT, PROPS */, _hoisted_166)
+                                        ])
+                                      ]))
+                                    : _createCommentVNode("v-if", true)
+                                ]),
+                                _createElementVNode("div", _hoisted_167, [
                                   _createElementVNode("button", {
                                     class: "ghost",
                                     type: "button",
                                     "data-testid": "cancel-key",
-                                    onClick: _cache[50] || (_cache[50] = (...args) => (_ctx.cancelKeyForm && _ctx.cancelKeyForm(...args)))
+                                    onClick: _cache[51] || (_cache[51] = (...args) => (_ctx.cancelKeyForm && _ctx.cancelKeyForm(...args)))
                                   }, _toDisplayString(_ctx.t('action.cancel')), 1 /* TEXT */),
-                                  _createElementVNode("button", _hoisted_166, _toDisplayString(_ctx.t('action.updateKey')), 1 /* TEXT */)
+                                  _createElementVNode("button", _hoisted_168, _toDisplayString(_ctx.t('action.updateKey')), 1 /* TEXT */)
                                 ])
                               ], 32 /* NEED_HYDRATION */))
                             : _createCommentVNode("v-if", true),
-                          _createElementVNode("div", _hoisted_167, [
+                          _createElementVNode("div", _hoisted_169, [
                             _createElementVNode("button", {
                               class: "ghost",
                               type: "button",
                               onClick: $event => (_ctx.testKey(k)),
                               disabled: _ctx.testingKeyId === k.id
-                            }, _toDisplayString(_ctx.testingKeyId === k.id ? _ctx.t('action.testing') : _ctx.t('action.test')), 9 /* TEXT, PROPS */, _hoisted_168),
+                            }, _toDisplayString(_ctx.testingKeyId === k.id ? _ctx.t('action.testing') : _ctx.t('action.test')), 9 /* TEXT, PROPS */, _hoisted_170),
                             (_ctx.keyTestResults[k.id])
                               ? (_openBlock(), _createElementBlock("span", {
                                   key: 0,
@@ -1457,61 +1472,61 @@ window.gatewayRender = function render(_ctx, _cache) {
                                 ], 2 /* CLASS */))
                               : _createCommentVNode("v-if", true),
                             (_ctx.testErrorText(_ctx.keyTestResults[k.id]))
-                              ? (_openBlock(), _createElementBlock("small", _hoisted_169, _toDisplayString(_ctx.testErrorText(_ctx.keyTestResults[k.id])), 1 /* TEXT */))
+                              ? (_openBlock(), _createElementBlock("small", _hoisted_171, _toDisplayString(_ctx.testErrorText(_ctx.keyTestResults[k.id])), 1 /* TEXT */))
                               : _createCommentVNode("v-if", true)
                           ]),
-                          _createElementVNode("div", _hoisted_170, [
+                          _createElementVNode("div", _hoisted_172, [
                             _createElementVNode("button", {
                               class: "ghost",
                               type: "button",
                               onClick: $event => (_ctx.editKey(k))
-                            }, _toDisplayString(_ctx.t('action.editKey')), 9 /* TEXT, PROPS */, _hoisted_171),
+                            }, _toDisplayString(_ctx.t('action.editKey')), 9 /* TEXT, PROPS */, _hoisted_173),
                             _createElementVNode("button", {
                               class: "ghost",
                               type: "button",
                               onClick: $event => (_ctx.preferKey(k))
-                            }, _toDisplayString(_ctx.t('action.prefer')), 9 /* TEXT, PROPS */, _hoisted_172),
+                            }, _toDisplayString(_ctx.t('action.prefer')), 9 /* TEXT, PROPS */, _hoisted_174),
                             _createElementVNode("button", {
                               class: "ghost",
                               type: "button",
                               onClick: $event => (_ctx.resetKey(k))
-                            }, _toDisplayString(_ctx.t('action.reset')), 9 /* TEXT, PROPS */, _hoisted_173),
+                            }, _toDisplayString(_ctx.t('action.reset')), 9 /* TEXT, PROPS */, _hoisted_175),
                             _createElementVNode("button", {
                               class: "ghost",
                               type: "button",
                               onClick: $event => (_ctx.toggleKey(k))
-                            }, _toDisplayString(k.enabled ? _ctx.t('action.disable') : _ctx.t('action.enable')), 9 /* TEXT, PROPS */, _hoisted_174),
+                            }, _toDisplayString(k.enabled ? _ctx.t('action.disable') : _ctx.t('action.enable')), 9 /* TEXT, PROPS */, _hoisted_176),
                             _createElementVNode("button", {
                               class: "danger",
                               type: "button",
                               onClick: $event => (_ctx.deleteKey(k))
-                            }, _toDisplayString(_ctx.t('action.delete')), 9 /* TEXT, PROPS */, _hoisted_175)
+                            }, _toDisplayString(_ctx.t('action.delete')), 9 /* TEXT, PROPS */, _hoisted_177)
                           ])
                         ]))
                       }), 128 /* KEYED_FRAGMENT */))
                     ]))
-                  : (_openBlock(), _createElementBlock("div", _hoisted_176, [
+                  : (_openBlock(), _createElementBlock("div", _hoisted_178, [
                       _createElementVNode("strong", null, _toDisplayString(_ctx.t('empty.keys')), 1 /* TEXT */),
                       _createElementVNode("small", null, _toDisplayString(_ctx.t('empty.keysHint')), 1 /* TEXT */),
                       _createElementVNode("button", {
                         type: "button",
                         onClick: $event => (_ctx.openKeyForm(p))
-                      }, _toDisplayString(_ctx.t('action.addKey')), 9 /* TEXT, PROPS */, _hoisted_177)
+                      }, _toDisplayString(_ctx.t('action.addKey')), 9 /* TEXT, PROPS */, _hoisted_179)
                     ]))
               ]))
             }), 128 /* KEYED_FRAGMENT */)),
             (!_ctx.providers.length)
-              ? (_openBlock(), _createElementBlock("div", _hoisted_178, [
+              ? (_openBlock(), _createElementBlock("div", _hoisted_180, [
                   _createElementVNode("strong", null, _toDisplayString(_ctx.t('empty.providers')), 1 /* TEXT */),
                   _createElementVNode("small", null, _toDisplayString(_ctx.t('empty.providersHint')), 1 /* TEXT */),
                   _createElementVNode("button", {
                     type: "button",
-                    onClick: _cache[52] || (_cache[52] = (...args) => (_ctx.openProviderForm && _ctx.openProviderForm(...args)))
+                    onClick: _cache[53] || (_cache[53] = (...args) => (_ctx.openProviderForm && _ctx.openProviderForm(...args)))
                   }, _toDisplayString(_ctx.t('action.addProvider')), 1 /* TEXT */)
                 ]))
               : _createCommentVNode("v-if", true)
           ]),
-          _createElementVNode("div", _hoisted_179, [
+          _createElementVNode("div", _hoisted_181, [
             _createElementVNode("div", null, [
               _createElementVNode("h2", null, _toDisplayString(_ctx.t('provider.balanceTitle')), 1 /* TEXT */),
               _createElementVNode("small", null, _toDisplayString(_ctx.t('empty.balancesHint')), 1 /* TEXT */)
@@ -1519,25 +1534,25 @@ window.gatewayRender = function render(_ctx, _cache) {
             _createElementVNode("button", {
               class: "ghost",
               type: "button",
-              onClick: _cache[53] || (_cache[53] = (...args) => (_ctx.refreshBalances && _ctx.refreshBalances(...args))),
+              onClick: _cache[54] || (_cache[54] = (...args) => (_ctx.refreshBalances && _ctx.refreshBalances(...args))),
               disabled: _ctx.balanceRefreshing
-            }, _toDisplayString(_ctx.balanceRefreshing ? _ctx.t('action.refreshingBalance') : _ctx.t('action.refreshBalance')), 9 /* TEXT, PROPS */, _hoisted_180)
+            }, _toDisplayString(_ctx.balanceRefreshing ? _ctx.t('action.refreshingBalance') : _ctx.t('action.refreshBalance')), 9 /* TEXT, PROPS */, _hoisted_182)
           ]),
           (_ctx.balanceResults.length)
-            ? (_openBlock(), _createElementBlock("div", _hoisted_181, [
+            ? (_openBlock(), _createElementBlock("div", _hoisted_183, [
                 (_openBlock(true), _createElementBlock(_Fragment, null, _renderList(_ctx.balanceResults, (result) => {
                   return (_openBlock(), _createElementBlock("div", {
                     key: result.providerId + ':' + result.keyId,
                     class: "compact-row"
                   }, [
-                    _createElementVNode("div", _hoisted_182, [
+                    _createElementVNode("div", _hoisted_184, [
                       _createElementVNode("strong", null, _toDisplayString(_ctx.providerDisplayName(result.providerId)) + " · " + _toDisplayString(_ctx.keyDisplayName(result.keyId)), 1 /* TEXT */),
                       (_ctx.hasDistinctProviderName(result.providerId) || _ctx.hasDistinctKeyName(result.keyId))
                         ? (_openBlock(), _createElementBlock("small", {
                             key: 0,
                             class: "entity-id",
                             title: `${result.providerId} · ${result.keyId || '-'}`
-                          }, _toDisplayString(result.providerId) + " · " + _toDisplayString(result.keyId || '-'), 9 /* TEXT, PROPS */, _hoisted_183))
+                          }, _toDisplayString(result.providerId) + " · " + _toDisplayString(result.keyId || '-'), 9 /* TEXT, PROPS */, _hoisted_185))
                         : _createCommentVNode("v-if", true),
                       _createElementVNode("small", null, _toDisplayString(result.error || result.status), 1 /* TEXT */)
                     ]),
@@ -1548,7 +1563,7 @@ window.gatewayRender = function render(_ctx, _cache) {
                 }), 128 /* KEYED_FRAGMENT */))
               ]))
             : _createCommentVNode("v-if", true),
-          _createElementVNode("div", _hoisted_184, [
+          _createElementVNode("div", _hoisted_186, [
             _createElementVNode("table", null, [
               _createElementVNode("thead", null, [
                 _createElementVNode("tr", null, [
@@ -1566,26 +1581,26 @@ window.gatewayRender = function render(_ctx, _cache) {
                     key: b.providerId + ':' + b.keyId
                   }, [
                     _createElementVNode("td", null, [
-                      _createElementVNode("div", _hoisted_185, [
+                      _createElementVNode("div", _hoisted_187, [
                         _createElementVNode("strong", null, _toDisplayString(_ctx.providerDisplayName(b.providerId)), 1 /* TEXT */),
                         (_ctx.hasDistinctProviderName(b.providerId))
                           ? (_openBlock(), _createElementBlock("code", {
                               key: 0,
                               class: "entity-id",
                               title: b.providerId
-                            }, _toDisplayString(b.providerId), 9 /* TEXT, PROPS */, _hoisted_186))
+                            }, _toDisplayString(b.providerId), 9 /* TEXT, PROPS */, _hoisted_188))
                           : _createCommentVNode("v-if", true)
                       ])
                     ]),
                     _createElementVNode("td", null, [
-                      _createElementVNode("div", _hoisted_187, [
+                      _createElementVNode("div", _hoisted_189, [
                         _createElementVNode("strong", null, _toDisplayString(_ctx.keyDisplayName(b.keyId)), 1 /* TEXT */),
                         (_ctx.hasDistinctKeyName(b.keyId))
                           ? (_openBlock(), _createElementBlock("code", {
                               key: 0,
                               class: "entity-id",
                               title: b.keyId
-                            }, _toDisplayString(b.keyId), 9 /* TEXT, PROPS */, _hoisted_188))
+                            }, _toDisplayString(b.keyId), 9 /* TEXT, PROPS */, _hoisted_190))
                           : _createCommentVNode("v-if", true)
                       ])
                     ]),
@@ -1602,9 +1617,9 @@ window.gatewayRender = function render(_ctx, _cache) {
                   ]))
                 }), 128 /* KEYED_FRAGMENT */)),
                 (!_ctx.balances.length)
-                  ? (_openBlock(), _createElementBlock("tr", _hoisted_189, [
-                      _createElementVNode("td", _hoisted_190, [
-                        _createElementVNode("div", _hoisted_191, [
+                  ? (_openBlock(), _createElementBlock("tr", _hoisted_191, [
+                      _createElementVNode("td", _hoisted_192, [
+                        _createElementVNode("div", _hoisted_193, [
                           _createElementVNode("strong", null, _toDisplayString(_ctx.t('empty.balances')), 1 /* TEXT */),
                           _createElementVNode("small", null, _toDisplayString(_ctx.t('empty.balancesHint')), 1 /* TEXT */)
                         ])
@@ -1618,16 +1633,16 @@ window.gatewayRender = function render(_ctx, _cache) {
       ], 512 /* NEED_PATCH */), [
         [_vShow, _ctx.activeSection === 'providers']
       ]),
-      _withDirectives(_createElementVNode("section", _hoisted_192, [
-        _createElementVNode("article", _hoisted_193, [
-          _createElementVNode("div", _hoisted_194, [
+      _withDirectives(_createElementVNode("section", _hoisted_194, [
+        _createElementVNode("article", _hoisted_195, [
+          _createElementVNode("div", _hoisted_196, [
             _createElementVNode("div", null, [
               _createElementVNode("h2", null, _toDisplayString(_ctx.t('modelRouting.title')), 1 /* TEXT */),
               _createElementVNode("small", null, _toDisplayString(_ctx.t('modelRouting.copy')), 1 /* TEXT */)
             ]),
             _createElementVNode("button", {
               type: "button",
-              onClick: _cache[54] || (_cache[54] = $event => (_ctx.openModelRouteForm()))
+              onClick: _cache[55] || (_cache[55] = $event => (_ctx.openModelRouteForm()))
             }, _toDisplayString(_ctx.t('action.addModelRoute')), 1 /* TEXT */)
           ]),
           (_ctx.modelRouteFormOpen)
@@ -1635,16 +1650,16 @@ window.gatewayRender = function render(_ctx, _cache) {
                 key: 0,
                 class: "model-route-editor",
                 "data-testid": "model-route-form",
-                onSubmit: _cache[60] || (_cache[60] = _withModifiers((...args) => (_ctx.saveModelRoute && _ctx.saveModelRoute(...args)), ["prevent"]))
+                onSubmit: _cache[61] || (_cache[61] = _withModifiers((...args) => (_ctx.saveModelRoute && _ctx.saveModelRoute(...args)), ["prevent"]))
               }, [
-                _createElementVNode("div", _hoisted_195, [
+                _createElementVNode("div", _hoisted_197, [
                   _createElementVNode("div", null, [
                     _createElementVNode("strong", null, _toDisplayString(_ctx.t(_ctx.modelRouteForm.editingId ? 'modelRouting.editTitle' : 'modelRouting.createTitle')), 1 /* TEXT */),
                     _createElementVNode("small", null, _toDisplayString(_ctx.t('modelRouting.orderRule')), 1 /* TEXT */)
                   ]),
-                  _createElementVNode("label", _hoisted_196, [
+                  _createElementVNode("label", _hoisted_198, [
                     _withDirectives(_createElementVNode("input", {
-                      "onUpdate:modelValue": _cache[55] || (_cache[55] = $event => ((_ctx.modelRouteForm.enabled) = $event)),
+                      "onUpdate:modelValue": _cache[56] || (_cache[56] = $event => ((_ctx.modelRouteForm.enabled) = $event)),
                       type: "checkbox"
                     }, null, 512 /* NEED_PATCH */), [
                       [_vModelCheckbox, _ctx.modelRouteForm.enabled]
@@ -1653,17 +1668,17 @@ window.gatewayRender = function render(_ctx, _cache) {
                   ])
                 ]),
                 (_ctx.formError)
-                  ? (_openBlock(), _createElementBlock("div", _hoisted_197, _toDisplayString(_ctx.formError), 1 /* TEXT */))
+                  ? (_openBlock(), _createElementBlock("div", _hoisted_199, _toDisplayString(_ctx.formError), 1 /* TEXT */))
                   : _createCommentVNode("v-if", true),
-                _createElementVNode("div", _hoisted_198, [
+                _createElementVNode("div", _hoisted_200, [
                   _createElementVNode("label", null, [
                     _createElementVNode("span", null, _toDisplayString(_ctx.t('modelRouting.publicModel')), 1 /* TEXT */),
                     _withDirectives(_createElementVNode("input", {
-                      "onUpdate:modelValue": _cache[56] || (_cache[56] = $event => ((_ctx.modelRouteForm.id) = $event)),
+                      "onUpdate:modelValue": _cache[57] || (_cache[57] = $event => ((_ctx.modelRouteForm.id) = $event)),
                       disabled: !!_ctx.modelRouteForm.editingId,
                       maxlength: "512",
                       required: ""
-                    }, null, 8 /* PROPS */, _hoisted_199), [
+                    }, null, 8 /* PROPS */, _hoisted_201), [
                       [
                         _vModelText,
                         _ctx.modelRouteForm.id,
@@ -1675,7 +1690,7 @@ window.gatewayRender = function render(_ctx, _cache) {
                   _createElementVNode("label", null, [
                     _createElementVNode("span", null, _toDisplayString(_ctx.t('table.name')), 1 /* TEXT */),
                     _withDirectives(_createElementVNode("input", {
-                      "onUpdate:modelValue": _cache[57] || (_cache[57] = $event => ((_ctx.modelRouteForm.name) = $event)),
+                      "onUpdate:modelValue": _cache[58] || (_cache[58] = $event => ((_ctx.modelRouteForm.name) = $event)),
                       maxlength: "256"
                     }, null, 512 /* NEED_PATCH */), [
                       [
@@ -1687,21 +1702,21 @@ window.gatewayRender = function render(_ctx, _cache) {
                     ])
                   ])
                 ]),
-                _createElementVNode("div", _hoisted_200, [
+                _createElementVNode("div", _hoisted_202, [
                   (_openBlock(true), _createElementBlock(_Fragment, null, _renderList(_ctx.modelRouteForm.models, (routeModel, modelIndex) => {
                     return (_openBlock(), _createElementBlock("div", {
                       key: modelIndex,
                       class: "route-model-row"
                     }, [
-                      _createElementVNode("div", _hoisted_201, [
-                        _createElementVNode("span", _hoisted_202, _toDisplayString(String(modelIndex + 1).padStart(2, '0')), 1 /* TEXT */),
+                      _createElementVNode("div", _hoisted_203, [
+                        _createElementVNode("span", _hoisted_204, _toDisplayString(String(modelIndex + 1).padStart(2, '0')), 1 /* TEXT */),
                         _createElementVNode("label", null, [
                           _createElementVNode("span", null, _toDisplayString(_ctx.t('modelRouting.fallbackModel')), 1 /* TEXT */),
                           _withDirectives(_createElementVNode("input", {
                             "onUpdate:modelValue": $event => ((routeModel.name) = $event),
                             maxlength: "512",
                             required: ""
-                          }, null, 8 /* PROPS */, _hoisted_203), [
+                          }, null, 8 /* PROPS */, _hoisted_205), [
                             [
                               _vModelText,
                               routeModel.name,
@@ -1710,14 +1725,14 @@ window.gatewayRender = function render(_ctx, _cache) {
                             ]
                           ])
                         ]),
-                        _createElementVNode("label", _hoisted_204, [
+                        _createElementVNode("label", _hoisted_206, [
                           _createElementVNode("span", null, _toDisplayString(_ctx.t('table.priority')), 1 /* TEXT */),
                           _withDirectives(_createElementVNode("input", {
                             "onUpdate:modelValue": $event => ((routeModel.priority) = $event),
                             type: "number",
                             min: "0",
                             max: "1000"
-                          }, null, 8 /* PROPS */, _hoisted_205), [
+                          }, null, 8 /* PROPS */, _hoisted_207), [
                             [
                               _vModelText,
                               routeModel.priority,
@@ -1726,11 +1741,11 @@ window.gatewayRender = function render(_ctx, _cache) {
                             ]
                           ])
                         ]),
-                        _createElementVNode("label", _hoisted_206, [
+                        _createElementVNode("label", _hoisted_208, [
                           _withDirectives(_createElementVNode("input", {
                             "onUpdate:modelValue": $event => ((routeModel.enabled) = $event),
                             type: "checkbox"
-                          }, null, 8 /* PROPS */, _hoisted_207), [
+                          }, null, 8 /* PROPS */, _hoisted_209), [
                             [_vModelCheckbox, routeModel.enabled]
                           ]),
                           _createTextVNode(" " + _toDisplayString(_ctx.t('status.enabled')), 1 /* TEXT */)
@@ -1741,15 +1756,15 @@ window.gatewayRender = function render(_ctx, _cache) {
                           "aria-label": _ctx.t('action.removeModel'),
                           title: _ctx.t('action.removeModel'),
                           onClick: $event => (_ctx.removeRouteModel(modelIndex))
-                        }, "×", 8 /* PROPS */, _hoisted_208)
+                        }, "×", 8 /* PROPS */, _hoisted_210)
                       ]),
-                      _createElementVNode("div", _hoisted_209, [
+                      _createElementVNode("div", _hoisted_211, [
                         (_openBlock(true), _createElementBlock(_Fragment, null, _renderList(routeModel.targets, (target, targetIndex) => {
                           return (_openBlock(), _createElementBlock("div", {
                             key: targetIndex,
                             class: "route-target-row"
                           }, [
-                            _cache[103] || (_cache[103] = _createElementVNode("span", {
+                            _cache[104] || (_cache[104] = _createElementVNode("span", {
                               class: "target-branch",
                               "aria-hidden": "true"
                             }, null, -1 /* CACHED */)),
@@ -1758,15 +1773,15 @@ window.gatewayRender = function render(_ctx, _cache) {
                               "aria-label": _ctx.t('table.provider'),
                               required: ""
                             }, [
-                              _createElementVNode("option", _hoisted_211, _toDisplayString(_ctx.t('placeholder.selectProvider')), 1 /* TEXT */),
+                              _createElementVNode("option", _hoisted_213, _toDisplayString(_ctx.t('placeholder.selectProvider')), 1 /* TEXT */),
                               (_openBlock(true), _createElementBlock(_Fragment, null, _renderList(_ctx.providers, (provider) => {
                                 return (_openBlock(), _createElementBlock("option", {
                                   key: provider.id,
                                   value: provider.id,
                                   disabled: _ctx.routeProviderSelected(modelIndex, targetIndex, provider.id)
-                                }, _toDisplayString(provider.name) + " · P" + _toDisplayString(provider.priority), 9 /* TEXT, PROPS */, _hoisted_212))
+                                }, _toDisplayString(provider.name) + " · P" + _toDisplayString(provider.priority), 9 /* TEXT, PROPS */, _hoisted_214))
                               }), 128 /* KEYED_FRAGMENT */))
-                            ], 8 /* PROPS */, _hoisted_210), [
+                            ], 8 /* PROPS */, _hoisted_212), [
                               [_vModelSelect, target.providerId]
                             ]),
                             _withDirectives(_createElementVNode("input", {
@@ -1776,7 +1791,7 @@ window.gatewayRender = function render(_ctx, _cache) {
                               placeholder: _ctx.t('modelRouting.upstreamModel'),
                               maxlength: "512",
                               required: ""
-                            }, null, 8 /* PROPS */, _hoisted_213), [
+                            }, null, 8 /* PROPS */, _hoisted_215), [
                               [
                                 _vModelText,
                                 target.upstreamModel,
@@ -1791,14 +1806,14 @@ window.gatewayRender = function render(_ctx, _cache) {
                                 return (_openBlock(), _createElementBlock("option", {
                                   key: model,
                                   value: model
-                                }, null, 8 /* PROPS */, _hoisted_215))
+                                }, null, 8 /* PROPS */, _hoisted_217))
                               }), 128 /* KEYED_FRAGMENT */))
-                            ], 8 /* PROPS */, _hoisted_214),
-                            _createElementVNode("label", _hoisted_216, [
+                            ], 8 /* PROPS */, _hoisted_216),
+                            _createElementVNode("label", _hoisted_218, [
                               _withDirectives(_createElementVNode("input", {
                                 "onUpdate:modelValue": $event => ((target.enabled) = $event),
                                 type: "checkbox"
-                              }, null, 8 /* PROPS */, _hoisted_217), [
+                              }, null, 8 /* PROPS */, _hoisted_219), [
                                 [_vModelCheckbox, target.enabled]
                               ]),
                               _createTextVNode(" " + _toDisplayString(_ctx.t('status.enabled')), 1 /* TEXT */)
@@ -1809,14 +1824,14 @@ window.gatewayRender = function render(_ctx, _cache) {
                               "aria-label": _ctx.t('action.removeTarget'),
                               title: _ctx.t('action.removeTarget'),
                               onClick: $event => (_ctx.removeRouteTarget(modelIndex, targetIndex))
-                            }, "×", 8 /* PROPS */, _hoisted_218)
+                            }, "×", 8 /* PROPS */, _hoisted_220)
                           ]))
                         }), 128 /* KEYED_FRAGMENT */)),
                         _createElementVNode("button", {
                           class: "ghost add-target-button",
                           type: "button",
                           onClick: $event => (_ctx.addRouteTarget(modelIndex))
-                        }, "+ " + _toDisplayString(_ctx.t('action.addTarget')), 9 /* TEXT, PROPS */, _hoisted_219)
+                        }, "+ " + _toDisplayString(_ctx.t('action.addTarget')), 9 /* TEXT, PROPS */, _hoisted_221)
                       ])
                     ]))
                   }), 128 /* KEYED_FRAGMENT */))
@@ -1824,28 +1839,28 @@ window.gatewayRender = function render(_ctx, _cache) {
                 _createElementVNode("button", {
                   class: "ghost add-route-model-button",
                   type: "button",
-                  onClick: _cache[58] || (_cache[58] = (...args) => (_ctx.addRouteModel && _ctx.addRouteModel(...args)))
+                  onClick: _cache[59] || (_cache[59] = (...args) => (_ctx.addRouteModel && _ctx.addRouteModel(...args)))
                 }, "+ " + _toDisplayString(_ctx.t('action.addFallbackModel')), 1 /* TEXT */),
-                _createElementVNode("div", _hoisted_220, [
+                _createElementVNode("div", _hoisted_222, [
                   _createElementVNode("button", {
                     class: "ghost",
                     type: "button",
-                    onClick: _cache[59] || (_cache[59] = (...args) => (_ctx.cancelModelRouteForm && _ctx.cancelModelRouteForm(...args)))
+                    onClick: _cache[60] || (_cache[60] = (...args) => (_ctx.cancelModelRouteForm && _ctx.cancelModelRouteForm(...args)))
                   }, _toDisplayString(_ctx.t('action.cancel')), 1 /* TEXT */),
-                  _createElementVNode("button", _hoisted_221, _toDisplayString(_ctx.t('action.saveModelRoute')), 1 /* TEXT */)
+                  _createElementVNode("button", _hoisted_223, _toDisplayString(_ctx.t('action.saveModelRoute')), 1 /* TEXT */)
                 ])
               ], 32 /* NEED_HYDRATION */))
             : _createCommentVNode("v-if", true),
           (_ctx.modelRoutes.length)
-            ? (_openBlock(), _createElementBlock("div", _hoisted_222, [
+            ? (_openBlock(), _createElementBlock("div", _hoisted_224, [
                 (_openBlock(true), _createElementBlock(_Fragment, null, _renderList(_ctx.modelRoutes, (route) => {
                   return (_openBlock(), _createElementBlock("article", {
                     key: route.id,
                     class: "model-route-item"
                   }, [
-                    _createElementVNode("div", _hoisted_223, [
+                    _createElementVNode("div", _hoisted_225, [
                       _createElementVNode("div", null, [
-                        _createElementVNode("div", _hoisted_224, [
+                        _createElementVNode("div", _hoisted_226, [
                           _createElementVNode("code", null, _toDisplayString(route.id), 1 /* TEXT */),
                           _createElementVNode("span", {
                             class: _normalizeClass(['pill', route.enabled ? 'ok' : 'bad'])
@@ -1853,36 +1868,36 @@ window.gatewayRender = function render(_ctx, _cache) {
                         ]),
                         _createElementVNode("h3", null, _toDisplayString(route.name || route.id), 1 /* TEXT */)
                       ]),
-                      _createElementVNode("div", _hoisted_225, [
+                      _createElementVNode("div", _hoisted_227, [
                         _createElementVNode("button", {
                           class: "ghost",
                           type: "button",
                           onClick: $event => (_ctx.openModelRouteForm(route))
-                        }, _toDisplayString(_ctx.t('action.edit')), 9 /* TEXT, PROPS */, _hoisted_226),
+                        }, _toDisplayString(_ctx.t('action.edit')), 9 /* TEXT, PROPS */, _hoisted_228),
                         _createElementVNode("button", {
                           class: "ghost",
                           type: "button",
                           onClick: $event => (_ctx.toggleModelRoute(route))
-                        }, _toDisplayString(route.enabled ? _ctx.t('action.disable') : _ctx.t('action.enable')), 9 /* TEXT, PROPS */, _hoisted_227),
+                        }, _toDisplayString(route.enabled ? _ctx.t('action.disable') : _ctx.t('action.enable')), 9 /* TEXT, PROPS */, _hoisted_229),
                         _createElementVNode("button", {
                           class: "danger",
                           type: "button",
                           onClick: $event => (_ctx.deleteModelRoute(route))
-                        }, _toDisplayString(_ctx.t('action.delete')), 9 /* TEXT, PROPS */, _hoisted_228)
+                        }, _toDisplayString(_ctx.t('action.delete')), 9 /* TEXT, PROPS */, _hoisted_230)
                       ])
                     ]),
-                    _createElementVNode("div", _hoisted_229, [
+                    _createElementVNode("div", _hoisted_231, [
                       (_openBlock(true), _createElementBlock(_Fragment, null, _renderList(route.models, (routeModel, modelIndex) => {
                         return (_openBlock(), _createElementBlock("div", {
                           key: routeModel.name,
                           class: _normalizeClass(['route-ladder-step', {disabled: !routeModel.enabled}])
                         }, [
-                          _createElementVNode("span", _hoisted_230, _toDisplayString(String(modelIndex + 1).padStart(2, '0')), 1 /* TEXT */),
-                          _createElementVNode("div", _hoisted_231, [
+                          _createElementVNode("span", _hoisted_232, _toDisplayString(String(modelIndex + 1).padStart(2, '0')), 1 /* TEXT */),
+                          _createElementVNode("div", _hoisted_233, [
                             _createElementVNode("strong", null, _toDisplayString(routeModel.name), 1 /* TEXT */),
                             _createElementVNode("small", null, _toDisplayString(_ctx.t('table.priority')) + " " + _toDisplayString(routeModel.priority), 1 /* TEXT */)
                           ]),
-                          _createElementVNode("div", _hoisted_232, [
+                          _createElementVNode("div", _hoisted_234, [
                             (_openBlock(true), _createElementBlock(_Fragment, null, _renderList(routeModel.targets, (target) => {
                               return (_openBlock(), _createElementBlock("span", {
                                 key: target.providerId + ':' + target.upstreamModel,
@@ -1890,17 +1905,20 @@ window.gatewayRender = function render(_ctx, _cache) {
                               }, [
                                 _createElementVNode("strong", null, _toDisplayString(_ctx.providerDisplayName(target.providerId)), 1 /* TEXT */),
                                 _createElementVNode("code", null, _toDisplayString(target.upstreamModel), 1 /* TEXT */),
+                                (_ctx.modelProviderCooling(target.providerId, target.upstreamModel))
+                                  ? (_openBlock(), _createElementBlock("small", _hoisted_235, _toDisplayString(_ctx.t('modelRouting.providerCooling')), 1 /* TEXT */))
+                                  : _createCommentVNode("v-if", true),
                                 (_ctx.modelCoolingCount(target.providerId, target.upstreamModel))
-                                  ? (_openBlock(), _createElementBlock("small", _hoisted_233, _toDisplayString(_ctx.t('modelRouting.coolingKeys', { count: _ctx.modelCoolingCount(target.providerId, target.upstreamModel) })), 1 /* TEXT */))
+                                  ? (_openBlock(), _createElementBlock("small", _hoisted_236, _toDisplayString(_ctx.t('modelRouting.coolingKeys', { count: _ctx.modelCoolingCount(target.providerId, target.upstreamModel) })), 1 /* TEXT */))
                                   : _createCommentVNode("v-if", true),
                                 (_ctx.modelHasFailureState(target.providerId, target.upstreamModel))
                                   ? (_openBlock(), _createElementBlock("button", {
-                                      key: 1,
+                                      key: 2,
                                       class: "route-state-reset",
                                       type: "button",
                                       title: _ctx.t('modelRouting.resetHealth'),
                                       onClick: $event => (_ctx.resetModelState(target.providerId, target.upstreamModel))
-                                    }, _toDisplayString(_ctx.t('action.reset')), 9 /* TEXT, PROPS */, _hoisted_234))
+                                    }, _toDisplayString(_ctx.t('action.reset')), 9 /* TEXT, PROPS */, _hoisted_237))
                                   : _createCommentVNode("v-if", true)
                               ], 2 /* CLASS */))
                             }), 128 /* KEYED_FRAGMENT */))
@@ -1912,12 +1930,12 @@ window.gatewayRender = function render(_ctx, _cache) {
                 }), 128 /* KEYED_FRAGMENT */))
               ]))
             : (!_ctx.modelRouteFormOpen)
-              ? (_openBlock(), _createElementBlock("div", _hoisted_235, [
+              ? (_openBlock(), _createElementBlock("div", _hoisted_238, [
                   _createElementVNode("strong", null, _toDisplayString(_ctx.t('modelRouting.empty')), 1 /* TEXT */),
                   _createElementVNode("small", null, _toDisplayString(_ctx.t('modelRouting.emptyCopy')), 1 /* TEXT */),
                   _createElementVNode("button", {
                     type: "button",
-                    onClick: _cache[61] || (_cache[61] = $event => (_ctx.openModelRouteForm()))
+                    onClick: _cache[62] || (_cache[62] = $event => (_ctx.openModelRouteForm()))
                   }, _toDisplayString(_ctx.t('action.addModelRoute')), 1 /* TEXT */)
                 ]))
               : _createCommentVNode("v-if", true)
@@ -1925,20 +1943,20 @@ window.gatewayRender = function render(_ctx, _cache) {
       ], 512 /* NEED_PATCH */), [
         [_vShow, _ctx.activeSection === 'model-routing']
       ]),
-      _withDirectives(_createElementVNode("section", _hoisted_236, [
-        _createElementVNode("article", _hoisted_237, [
-          _createElementVNode("div", _hoisted_238, [
+      _withDirectives(_createElementVNode("section", _hoisted_239, [
+        _createElementVNode("article", _hoisted_240, [
+          _createElementVNode("div", _hoisted_241, [
             _createElementVNode("strong", null, _toDisplayString(_ctx.t('keys.title')), 1 /* TEXT */),
             _createElementVNode("span", null, _toDisplayString(_ctx.t('keys.copy')), 1 /* TEXT */)
           ]),
           _createElementVNode("form", {
             class: "form-grid gateway-key-form",
-            onSubmit: _cache[63] || (_cache[63] = _withModifiers((...args) => (_ctx.createGatewayKey && _ctx.createGatewayKey(...args)), ["prevent"]))
+            onSubmit: _cache[64] || (_cache[64] = _withModifiers((...args) => (_ctx.createGatewayKey && _ctx.createGatewayKey(...args)), ["prevent"]))
           }, [
             _withDirectives(_createElementVNode("input", {
-              "onUpdate:modelValue": _cache[62] || (_cache[62] = $event => ((_ctx.gatewayKeyForm.name) = $event)),
+              "onUpdate:modelValue": _cache[63] || (_cache[63] = $event => ((_ctx.gatewayKeyForm.name) = $event)),
               placeholder: _ctx.t('placeholder.gatewayKeyName')
-            }, null, 8 /* PROPS */, _hoisted_239), [
+            }, null, 8 /* PROPS */, _hoisted_242), [
               [
                 _vModelText,
                 _ctx.gatewayKeyForm.name,
@@ -1946,38 +1964,38 @@ window.gatewayRender = function render(_ctx, _cache) {
                 { trim: true }
               ]
             ]),
-            _createElementVNode("div", _hoisted_240, [
-              _createElementVNode("button", _hoisted_241, _toDisplayString(_ctx.t('action.addGatewayKey')), 1 /* TEXT */)
+            _createElementVNode("div", _hoisted_243, [
+              _createElementVNode("button", _hoisted_244, _toDisplayString(_ctx.t('action.addGatewayKey')), 1 /* TEXT */)
             ])
           ], 32 /* NEED_HYDRATION */),
           (_ctx.createdGatewayKey?.plaintext)
-            ? (_openBlock(), _createElementBlock("div", _hoisted_242, [
+            ? (_openBlock(), _createElementBlock("div", _hoisted_245, [
                 _createElementVNode("strong", null, _toDisplayString(_ctx.t(_ctx.createdGatewayKey.event === 'rotated' ? 'gateway.rotatedTitle' : 'gateway.createdTitle')), 1 /* TEXT */),
                 _createElementVNode("span", null, _toDisplayString(_ctx.t(_ctx.createdGatewayKey.event === 'rotated' ? 'gateway.rotatedCopy' : 'gateway.createdCopy')), 1 /* TEXT */),
-                _createElementVNode("code", _hoisted_243, _toDisplayString(_ctx.createdGatewayKey.plaintext), 1 /* TEXT */),
+                _createElementVNode("code", _hoisted_246, _toDisplayString(_ctx.createdGatewayKey.plaintext), 1 /* TEXT */),
                 _createElementVNode("button", {
                   type: "button",
                   class: _normalizeClass(_ctx.copyButtonClass('createdGatewayKey')),
-                  onClick: _cache[64] || (_cache[64] = $event => (_ctx.copyText(_ctx.createdGatewayKey.plaintext, 'createdGatewayKey')))
+                  onClick: _cache[65] || (_cache[65] = $event => (_ctx.copyText(_ctx.createdGatewayKey.plaintext, 'createdGatewayKey')))
                 }, _toDisplayString(_ctx.copyButtonText('createdGatewayKey')), 3 /* TEXT, CLASS */)
               ]))
             : _createCommentVNode("v-if", true),
-          _createElementVNode("div", _hoisted_244, [
+          _createElementVNode("div", _hoisted_247, [
             _createElementVNode("strong", null, _toDisplayString(_ctx.t('gateway.compatTitle')), 1 /* TEXT */),
             _createElementVNode("span", null, _toDisplayString(_ctx.t('gateway.compatCopy')), 1 /* TEXT */)
           ]),
           (!_ctx.gatewayKeys.length)
-            ? (_openBlock(), _createElementBlock("div", _hoisted_245, [
+            ? (_openBlock(), _createElementBlock("div", _hoisted_248, [
                 _createElementVNode("strong", null, _toDisplayString(_ctx.t('nav.keys')), 1 /* TEXT */),
                 _createElementVNode("small", null, _toDisplayString(_ctx.t('keys.copy')), 1 /* TEXT */)
               ]))
-            : (_openBlock(), _createElementBlock("div", _hoisted_246, [
+            : (_openBlock(), _createElementBlock("div", _hoisted_249, [
                 _createElementVNode("table", null, [
                   _createElementVNode("thead", null, [
                     _createElementVNode("tr", null, [
-                      _cache[104] || (_cache[104] = _createElementVNode("th", null, "ID", -1 /* CACHED */)),
+                      _cache[105] || (_cache[105] = _createElementVNode("th", null, "ID", -1 /* CACHED */)),
                       _createElementVNode("th", null, _toDisplayString(_ctx.t('table.name')), 1 /* TEXT */),
-                      _cache[105] || (_cache[105] = _createElementVNode("th", null, "Key", -1 /* CACHED */)),
+                      _cache[106] || (_cache[106] = _createElementVNode("th", null, "Key", -1 /* CACHED */)),
                       _createElementVNode("th", null, _toDisplayString(_ctx.t('table.requests')), 1 /* TEXT */),
                       _createElementVNode("th", null, _toDisplayString(_ctx.t('table.lastUsed')), 1 /* TEXT */),
                       _createElementVNode("th", null, _toDisplayString(_ctx.t('table.status')), 1 /* TEXT */),
@@ -1994,7 +2012,7 @@ window.gatewayRender = function render(_ctx, _cache) {
                         ]),
                         _createElementVNode("td", null, _toDisplayString(k.name), 1 /* TEXT */),
                         _createElementVNode("td", null, [
-                          _createElementVNode("code", _hoisted_247, _toDisplayString(k.keyHint), 1 /* TEXT */)
+                          _createElementVNode("code", _hoisted_250, _toDisplayString(k.keyHint), 1 /* TEXT */)
                         ]),
                         _createElementVNode("td", null, _toDisplayString(k.requestCount), 1 /* TEXT */),
                         _createElementVNode("td", null, _toDisplayString(_ctx.formatGatewayTime(k.lastUsedAt)), 1 /* TEXT */),
@@ -2003,22 +2021,22 @@ window.gatewayRender = function render(_ctx, _cache) {
                             class: _normalizeClass(['pill', k.enabled ? 'ok' : 'bad'])
                           }, _toDisplayString(k.enabled ? _ctx.t('status.enabled') : _ctx.t('status.disabled')), 3 /* TEXT, CLASS */)
                         ]),
-                        _createElementVNode("td", _hoisted_248, [
+                        _createElementVNode("td", _hoisted_251, [
                           _createElementVNode("button", {
                             class: "ghost",
                             type: "button",
                             onClick: $event => (_ctx.toggleGatewayKey(k))
-                          }, _toDisplayString(k.enabled ? _ctx.t('action.disable') : _ctx.t('action.enable')), 9 /* TEXT, PROPS */, _hoisted_249),
+                          }, _toDisplayString(k.enabled ? _ctx.t('action.disable') : _ctx.t('action.enable')), 9 /* TEXT, PROPS */, _hoisted_252),
                           _createElementVNode("button", {
                             class: "ghost",
                             type: "button",
                             onClick: $event => (_ctx.rotateGatewayKey(k))
-                          }, _toDisplayString(_ctx.t('action.rotate')), 9 /* TEXT, PROPS */, _hoisted_250),
+                          }, _toDisplayString(_ctx.t('action.rotate')), 9 /* TEXT, PROPS */, _hoisted_253),
                           _createElementVNode("button", {
                             class: "danger",
                             type: "button",
                             onClick: $event => (_ctx.deleteGatewayKey(k))
-                          }, _toDisplayString(_ctx.t('action.delete')), 9 /* TEXT, PROPS */, _hoisted_251)
+                          }, _toDisplayString(_ctx.t('action.delete')), 9 /* TEXT, PROPS */, _hoisted_254)
                         ])
                       ]))
                     }), 128 /* KEYED_FRAGMENT */))
@@ -2029,24 +2047,24 @@ window.gatewayRender = function render(_ctx, _cache) {
       ], 512 /* NEED_PATCH */), [
         [_vShow, _ctx.activeSection === 'keys']
       ]),
-      _withDirectives(_createElementVNode("section", _hoisted_252, [
-        _createElementVNode("article", _hoisted_253, [
+      _withDirectives(_createElementVNode("section", _hoisted_255, [
+        _createElementVNode("article", _hoisted_256, [
           _createElementVNode("form", {
             class: "form-grid routing-form",
-            onSubmit: _cache[81] || (_cache[81] = _withModifiers((...args) => (_ctx.saveRouting && _ctx.saveRouting(...args)), ["prevent"]))
+            onSubmit: _cache[82] || (_cache[82] = _withModifiers((...args) => (_ctx.saveRouting && _ctx.saveRouting(...args)), ["prevent"]))
           }, [
-            _createElementVNode("div", _hoisted_254, [
-              _createElementVNode("div", _hoisted_255, [
+            _createElementVNode("div", _hoisted_257, [
+              _createElementVNode("div", _hoisted_258, [
                 _createElementVNode("div", null, [
                   _createElementVNode("strong", null, _toDisplayString(_ctx.t('routing.simpleTitle')), 1 /* TEXT */),
                   _createElementVNode("small", null, _toDisplayString(_ctx.t('routing.simpleCopy')), 1 /* TEXT */)
                 ])
               ]),
-              _createElementVNode("div", _hoisted_256, [
+              _createElementVNode("div", _hoisted_259, [
                 _createElementVNode("label", null, [
                   _createElementVNode("span", null, _toDisplayString(_ctx.t('routing.failureThreshold')), 1 /* TEXT */),
                   _withDirectives(_createElementVNode("input", {
-                    "onUpdate:modelValue": _cache[65] || (_cache[65] = $event => ((_ctx.routing.failureThreshold) = $event)),
+                    "onUpdate:modelValue": _cache[66] || (_cache[66] = $event => ((_ctx.routing.failureThreshold) = $event)),
                     type: "number",
                     min: "1"
                   }, null, 512 /* NEED_PATCH */), [
@@ -2061,7 +2079,7 @@ window.gatewayRender = function render(_ctx, _cache) {
                 _createElementVNode("label", null, [
                   _createElementVNode("span", null, _toDisplayString(_ctx.t('routing.cooldownSeconds')), 1 /* TEXT */),
                   _withDirectives(_createElementVNode("input", {
-                    "onUpdate:modelValue": _cache[66] || (_cache[66] = $event => ((_ctx.routing.cooldownSeconds) = $event)),
+                    "onUpdate:modelValue": _cache[67] || (_cache[67] = $event => ((_ctx.routing.cooldownSeconds) = $event)),
                     type: "number",
                     min: "0"
                   }, null, 512 /* NEED_PATCH */), [
@@ -2076,7 +2094,7 @@ window.gatewayRender = function render(_ctx, _cache) {
                 _createElementVNode("label", null, [
                   _createElementVNode("span", null, _toDisplayString(_ctx.t('routing.retryPerRequest')), 1 /* TEXT */),
                   _withDirectives(_createElementVNode("input", {
-                    "onUpdate:modelValue": _cache[67] || (_cache[67] = $event => ((_ctx.routing.retryPerRequest) = $event)),
+                    "onUpdate:modelValue": _cache[68] || (_cache[68] = $event => ((_ctx.routing.retryPerRequest) = $event)),
                     type: "number",
                     min: "1"
                   }, null, 512 /* NEED_PATCH */), [
@@ -2091,7 +2109,7 @@ window.gatewayRender = function render(_ctx, _cache) {
                 _createElementVNode("label", null, [
                   _createElementVNode("span", null, _toDisplayString(_ctx.t('routing.timeoutSeconds')), 1 /* TEXT */),
                   _withDirectives(_createElementVNode("input", {
-                    "onUpdate:modelValue": _cache[68] || (_cache[68] = $event => ((_ctx.routing.timeoutSeconds) = $event)),
+                    "onUpdate:modelValue": _cache[69] || (_cache[69] = $event => ((_ctx.routing.timeoutSeconds) = $event)),
                     type: "number",
                     min: "1"
                   }, null, 512 /* NEED_PATCH */), [
@@ -2106,7 +2124,7 @@ window.gatewayRender = function render(_ctx, _cache) {
                 _createElementVNode("label", null, [
                   _createElementVNode("span", null, _toDisplayString(_ctx.t('routing.maxConcurrentRequests')), 1 /* TEXT */),
                   _withDirectives(_createElementVNode("input", {
-                    "onUpdate:modelValue": _cache[69] || (_cache[69] = $event => ((_ctx.routing.maxConcurrentRequests) = $event)),
+                    "onUpdate:modelValue": _cache[70] || (_cache[70] = $event => ((_ctx.routing.maxConcurrentRequests) = $event)),
                     type: "number",
                     min: "0"
                   }, null, 512 /* NEED_PATCH */), [
@@ -2118,18 +2136,18 @@ window.gatewayRender = function render(_ctx, _cache) {
                     ]
                   ])
                 ]),
-                _createElementVNode("label", _hoisted_257, [
+                _createElementVNode("label", _hoisted_260, [
                   _withDirectives(_createElementVNode("input", {
-                    "onUpdate:modelValue": _cache[70] || (_cache[70] = $event => ((_ctx.routing.streamRetryBeforeFirstByte) = $event)),
+                    "onUpdate:modelValue": _cache[71] || (_cache[71] = $event => ((_ctx.routing.streamRetryBeforeFirstByte) = $event)),
                     type: "checkbox"
                   }, null, 512 /* NEED_PATCH */), [
                     [_vModelCheckbox, _ctx.routing.streamRetryBeforeFirstByte]
                   ]),
                   _createTextVNode(" " + _toDisplayString(_ctx.t('routing.streamRetryBeforeFirstByte')), 1 /* TEXT */)
                 ]),
-                _createElementVNode("label", _hoisted_258, [
+                _createElementVNode("label", _hoisted_261, [
                   _withDirectives(_createElementVNode("input", {
-                    "onUpdate:modelValue": _cache[71] || (_cache[71] = $event => ((_ctx.routing.fallbackOnBusy) = $event)),
+                    "onUpdate:modelValue": _cache[72] || (_cache[72] = $event => ((_ctx.routing.fallbackOnBusy) = $event)),
                     type: "checkbox"
                   }, null, 512 /* NEED_PATCH */), [
                     [_vModelCheckbox, _ctx.routing.fallbackOnBusy]
@@ -2138,28 +2156,28 @@ window.gatewayRender = function render(_ctx, _cache) {
                 ])
               ])
             ]),
-            _createElementVNode("div", _hoisted_259, [
+            _createElementVNode("div", _hoisted_262, [
               _createElementVNode("button", {
                 class: "ghost",
                 type: "button",
                 "aria-expanded": _ctx.routingAdvanced,
                 "aria-controls": "routing-advanced",
-                onClick: _cache[72] || (_cache[72] = $event => (_ctx.routingAdvanced = !_ctx.routingAdvanced))
-              }, _toDisplayString(_ctx.routingAdvanced ? _ctx.t('routing.hideAdvanced') : _ctx.t('routing.showAdvanced')), 9 /* TEXT, PROPS */, _hoisted_260)
+                onClick: _cache[73] || (_cache[73] = $event => (_ctx.routingAdvanced = !_ctx.routingAdvanced))
+              }, _toDisplayString(_ctx.routingAdvanced ? _ctx.t('routing.hideAdvanced') : _ctx.t('routing.showAdvanced')), 9 /* TEXT, PROPS */, _hoisted_263)
             ]),
             (_ctx.routingAdvanced)
-              ? (_openBlock(), _createElementBlock("div", _hoisted_261, [
-                  _createElementVNode("div", _hoisted_262, [
+              ? (_openBlock(), _createElementBlock("div", _hoisted_264, [
+                  _createElementVNode("div", _hoisted_265, [
                     _createElementVNode("div", null, [
                       _createElementVNode("strong", null, _toDisplayString(_ctx.t('routing.advancedTitle')), 1 /* TEXT */),
                       _createElementVNode("small", null, _toDisplayString(_ctx.t('routing.advancedCopy')), 1 /* TEXT */)
                     ])
                   ]),
-                  _createElementVNode("div", _hoisted_263, [
+                  _createElementVNode("div", _hoisted_266, [
                     _createElementVNode("label", null, [
                       _createElementVNode("span", null, _toDisplayString(_ctx.t('routing.authCooldownSeconds')), 1 /* TEXT */),
                       _withDirectives(_createElementVNode("input", {
-                        "onUpdate:modelValue": _cache[73] || (_cache[73] = $event => ((_ctx.routing.authCooldownSeconds) = $event)),
+                        "onUpdate:modelValue": _cache[74] || (_cache[74] = $event => ((_ctx.routing.authCooldownSeconds) = $event)),
                         type: "number",
                         min: "0"
                       }, null, 512 /* NEED_PATCH */), [
@@ -2174,7 +2192,7 @@ window.gatewayRender = function render(_ctx, _cache) {
                     _createElementVNode("label", null, [
                       _createElementVNode("span", null, _toDisplayString(_ctx.t('routing.streamIdleTimeoutSeconds')), 1 /* TEXT */),
                       _withDirectives(_createElementVNode("input", {
-                        "onUpdate:modelValue": _cache[74] || (_cache[74] = $event => ((_ctx.routing.streamIdleTimeoutSeconds) = $event)),
+                        "onUpdate:modelValue": _cache[75] || (_cache[75] = $event => ((_ctx.routing.streamIdleTimeoutSeconds) = $event)),
                         type: "number",
                         min: "1"
                       }, null, 512 /* NEED_PATCH */), [
@@ -2189,7 +2207,7 @@ window.gatewayRender = function render(_ctx, _cache) {
                     _createElementVNode("label", null, [
                       _createElementVNode("span", null, _toDisplayString(_ctx.t('routing.streamWriteTimeoutSeconds')), 1 /* TEXT */),
                       _withDirectives(_createElementVNode("input", {
-                        "onUpdate:modelValue": _cache[75] || (_cache[75] = $event => ((_ctx.routing.streamWriteTimeoutSeconds) = $event)),
+                        "onUpdate:modelValue": _cache[76] || (_cache[76] = $event => ((_ctx.routing.streamWriteTimeoutSeconds) = $event)),
                         type: "number",
                         min: "1"
                       }, null, 512 /* NEED_PATCH */), [
@@ -2204,7 +2222,7 @@ window.gatewayRender = function render(_ctx, _cache) {
                     _createElementVNode("label", null, [
                       _createElementVNode("span", null, _toDisplayString(_ctx.t('routing.maxConcurrentPerProvider')), 1 /* TEXT */),
                       _withDirectives(_createElementVNode("input", {
-                        "onUpdate:modelValue": _cache[76] || (_cache[76] = $event => ((_ctx.routing.maxConcurrentPerProvider) = $event)),
+                        "onUpdate:modelValue": _cache[77] || (_cache[77] = $event => ((_ctx.routing.maxConcurrentPerProvider) = $event)),
                         type: "number",
                         min: "0"
                       }, null, 512 /* NEED_PATCH */), [
@@ -2219,7 +2237,7 @@ window.gatewayRender = function render(_ctx, _cache) {
                     _createElementVNode("label", null, [
                       _createElementVNode("span", null, _toDisplayString(_ctx.t('routing.maxConcurrentPerKey')), 1 /* TEXT */),
                       _withDirectives(_createElementVNode("input", {
-                        "onUpdate:modelValue": _cache[77] || (_cache[77] = $event => ((_ctx.routing.maxConcurrentPerKey) = $event)),
+                        "onUpdate:modelValue": _cache[78] || (_cache[78] = $event => ((_ctx.routing.maxConcurrentPerKey) = $event)),
                         type: "number",
                         min: "0"
                       }, null, 512 /* NEED_PATCH */), [
@@ -2234,7 +2252,7 @@ window.gatewayRender = function render(_ctx, _cache) {
                     _createElementVNode("label", null, [
                       _createElementVNode("span", null, _toDisplayString(_ctx.t('routing.queueTimeoutMilliseconds')), 1 /* TEXT */),
                       _withDirectives(_createElementVNode("input", {
-                        "onUpdate:modelValue": _cache[78] || (_cache[78] = $event => ((_ctx.routing.queueTimeoutMilliseconds) = $event)),
+                        "onUpdate:modelValue": _cache[79] || (_cache[79] = $event => ((_ctx.routing.queueTimeoutMilliseconds) = $event)),
                         type: "number",
                         min: "0"
                       }, null, 512 /* NEED_PATCH */), [
@@ -2247,21 +2265,21 @@ window.gatewayRender = function render(_ctx, _cache) {
                       ])
                     ])
                   ]),
-                  _createElementVNode("div", _hoisted_264, [
+                  _createElementVNode("div", _hoisted_267, [
                     _createElementVNode("strong", null, _toDisplayString(_ctx.t('routing.riskTitle')), 1 /* TEXT */),
                     _createElementVNode("small", null, _toDisplayString(_ctx.t('routing.riskCopy')), 1 /* TEXT */),
-                    _createElementVNode("label", _hoisted_265, [
+                    _createElementVNode("label", _hoisted_268, [
                       _withDirectives(_createElementVNode("input", {
-                        "onUpdate:modelValue": _cache[79] || (_cache[79] = $event => ((_ctx.routing.retryAmbiguousErrors) = $event)),
+                        "onUpdate:modelValue": _cache[80] || (_cache[80] = $event => ((_ctx.routing.retryAmbiguousErrors) = $event)),
                         type: "checkbox"
                       }, null, 512 /* NEED_PATCH */), [
                         [_vModelCheckbox, _ctx.routing.retryAmbiguousErrors]
                       ]),
                       _createTextVNode(" " + _toDisplayString(_ctx.t('routing.retryAmbiguousErrors')), 1 /* TEXT */)
                     ]),
-                    _createElementVNode("label", _hoisted_266, [
+                    _createElementVNode("label", _hoisted_269, [
                       _withDirectives(_createElementVNode("input", {
-                        "onUpdate:modelValue": _cache[80] || (_cache[80] = $event => ((_ctx.routing.allowInsecureUpstreams) = $event)),
+                        "onUpdate:modelValue": _cache[81] || (_cache[81] = $event => ((_ctx.routing.allowInsecureUpstreams) = $event)),
                         type: "checkbox"
                       }, null, 512 /* NEED_PATCH */), [
                         [_vModelCheckbox, _ctx.routing.allowInsecureUpstreams]
@@ -2271,36 +2289,36 @@ window.gatewayRender = function render(_ctx, _cache) {
                   ])
                 ]))
               : _createCommentVNode("v-if", true),
-            _createElementVNode("div", _hoisted_267, [
-              _createElementVNode("button", _hoisted_268, _toDisplayString(_ctx.t('action.save')), 1 /* TEXT */)
+            _createElementVNode("div", _hoisted_270, [
+              _createElementVNode("button", _hoisted_271, _toDisplayString(_ctx.t('action.save')), 1 /* TEXT */)
             ])
           ], 32 /* NEED_HYDRATION */),
           (_ctx.routingMessage)
-            ? (_openBlock(), _createElementBlock("div", _hoisted_269, _toDisplayString(_ctx.routingMessage), 1 /* TEXT */))
+            ? (_openBlock(), _createElementBlock("div", _hoisted_272, _toDisplayString(_ctx.routingMessage), 1 /* TEXT */))
             : _createCommentVNode("v-if", true),
-          _createElementVNode("div", _hoisted_270, [
+          _createElementVNode("div", _hoisted_273, [
             _createElementVNode("h2", null, _toDisplayString(_ctx.t('maintenance.title')), 1 /* TEXT */),
-            _createElementVNode("div", _hoisted_271, [
+            _createElementVNode("div", _hoisted_274, [
               _createElementVNode("button", {
                 class: "ghost",
                 type: "button",
-                onClick: _cache[82] || (_cache[82] = (...args) => (_ctx.checkIntegrity && _ctx.checkIntegrity(...args)))
+                onClick: _cache[83] || (_cache[83] = (...args) => (_ctx.checkIntegrity && _ctx.checkIntegrity(...args)))
               }, _toDisplayString(_ctx.t('maintenance.checkIntegrity')), 1 /* TEXT */),
               _createElementVNode("button", {
                 class: "ghost",
                 type: "button",
-                onClick: _cache[83] || (_cache[83] = (...args) => (_ctx.downloadBackup && _ctx.downloadBackup(...args)))
+                onClick: _cache[84] || (_cache[84] = (...args) => (_ctx.downloadBackup && _ctx.downloadBackup(...args)))
               }, _toDisplayString(_ctx.t('maintenance.downloadDatabaseBackup')), 1 /* TEXT */)
             ])
           ]),
           _createElementVNode("form", {
             class: "portable-backup-form",
-            onSubmit: _cache[86] || (_cache[86] = _withModifiers((...args) => (_ctx.downloadPortableBackup && _ctx.downloadPortableBackup(...args)), ["prevent"]))
+            onSubmit: _cache[87] || (_cache[87] = _withModifiers((...args) => (_ctx.downloadPortableBackup && _ctx.downloadPortableBackup(...args)), ["prevent"]))
           }, [
             _createElementVNode("label", null, [
               _createElementVNode("span", null, _toDisplayString(_ctx.t('maintenance.passphrase')), 1 /* TEXT */),
               _withDirectives(_createElementVNode("input", {
-                "onUpdate:modelValue": _cache[84] || (_cache[84] = $event => ((_ctx.backupPassphrase) = $event)),
+                "onUpdate:modelValue": _cache[85] || (_cache[85] = $event => ((_ctx.backupPassphrase) = $event)),
                 type: "password",
                 minlength: "12",
                 autocomplete: "new-password",
@@ -2312,7 +2330,7 @@ window.gatewayRender = function render(_ctx, _cache) {
             _createElementVNode("label", null, [
               _createElementVNode("span", null, _toDisplayString(_ctx.t('maintenance.confirmPassphrase')), 1 /* TEXT */),
               _withDirectives(_createElementVNode("input", {
-                "onUpdate:modelValue": _cache[85] || (_cache[85] = $event => ((_ctx.backupPassphraseConfirm) = $event)),
+                "onUpdate:modelValue": _cache[86] || (_cache[86] = $event => ((_ctx.backupPassphraseConfirm) = $event)),
                 type: "password",
                 minlength: "12",
                 autocomplete: "new-password",
@@ -2321,41 +2339,41 @@ window.gatewayRender = function render(_ctx, _cache) {
                 [_vModelText, _ctx.backupPassphraseConfirm]
               ])
             ]),
-            _createElementVNode("button", _hoisted_272, _toDisplayString(_ctx.t('maintenance.downloadPortableBackup')), 1 /* TEXT */)
+            _createElementVNode("button", _hoisted_275, _toDisplayString(_ctx.t('maintenance.downloadPortableBackup')), 1 /* TEXT */)
           ], 32 /* NEED_HYDRATION */),
           (_ctx.maintenanceMessage)
-            ? (_openBlock(), _createElementBlock("div", _hoisted_273, _toDisplayString(_ctx.maintenanceMessage), 1 /* TEXT */))
+            ? (_openBlock(), _createElementBlock("div", _hoisted_276, _toDisplayString(_ctx.maintenanceMessage), 1 /* TEXT */))
             : _createCommentVNode("v-if", true)
         ])
       ], 512 /* NEED_PATCH */), [
         [_vShow, _ctx.activeSection === 'routing']
       ]),
-      _withDirectives(_createElementVNode("section", _hoisted_274, [
-        _createElementVNode("article", _hoisted_275, [
-          _createElementVNode("div", _hoisted_276, [
+      _withDirectives(_createElementVNode("section", _hoisted_277, [
+        _createElementVNode("article", _hoisted_278, [
+          _createElementVNode("div", _hoisted_279, [
             _createElementVNode("button", {
               class: "ghost",
               type: "button",
-              onClick: _cache[87] || (_cache[87] = $event => (_ctx.setActiveSection('providers')))
+              onClick: _cache[88] || (_cache[88] = $event => (_ctx.setActiveSection('providers')))
             }, _toDisplayString(_ctx.t('action.backProviders')), 1 /* TEXT */)
           ]),
-          _createElementVNode("div", _hoisted_277, [
+          _createElementVNode("div", _hoisted_280, [
             _createElementVNode("strong", null, _toDisplayString(_ctx.t('setup.title')), 1 /* TEXT */),
             _createElementVNode("span", null, _toDisplayString(_ctx.t('setup.copy')), 1 /* TEXT */)
           ]),
-          _createElementVNode("div", _hoisted_278, [
+          _createElementVNode("div", _hoisted_281, [
             (_openBlock(true), _createElementBlock(_Fragment, null, _renderList(_ctx.snippets, (value, name) => {
               return (_openBlock(), _createElementBlock("div", {
                 key: name,
                 class: "snippet"
               }, [
-                _createElementVNode("div", _hoisted_279, [
+                _createElementVNode("div", _hoisted_282, [
                   _createElementVNode("h3", null, _toDisplayString(name), 1 /* TEXT */),
                   _createElementVNode("button", {
                     class: _normalizeClass(["ghost copy-chip", _ctx.copyButtonClass(`snippet:${name}`)]),
                     type: "button",
                     onClick: $event => (_ctx.copyText(typeof value === 'string' ? value : _ctx.pretty(value), `snippet:${name}`))
-                  }, _toDisplayString(_ctx.copyButtonText(`snippet:${name}`)), 11 /* TEXT, CLASS, PROPS */, _hoisted_280)
+                  }, _toDisplayString(_ctx.copyButtonText(`snippet:${name}`)), 11 /* TEXT, CLASS, PROPS */, _hoisted_283)
                 ]),
                 _createElementVNode("pre", null, _toDisplayString(typeof value === 'string' ? value : _ctx.pretty(value)), 1 /* TEXT */)
               ]))
@@ -2365,15 +2383,15 @@ window.gatewayRender = function render(_ctx, _cache) {
       ], 512 /* NEED_PATCH */), [
         [_vShow, _ctx.activeSection === 'setup']
       ]),
-      _withDirectives(_createElementVNode("section", _hoisted_281, [
-        _createElementVNode("article", _hoisted_282, [
-          _createElementVNode("div", _hoisted_283, [
+      _withDirectives(_createElementVNode("section", _hoisted_284, [
+        _createElementVNode("article", _hoisted_285, [
+          _createElementVNode("div", _hoisted_286, [
             _withDirectives(_createElementVNode("input", {
-              "onUpdate:modelValue": _cache[88] || (_cache[88] = $event => ((_ctx.logFilters.q) = $event)),
+              "onUpdate:modelValue": _cache[89] || (_cache[89] = $event => ((_ctx.logFilters.q) = $event)),
               "aria-label": _ctx.t('logs.search'),
               placeholder: _ctx.t('logs.search'),
-              onKeyup: _cache[89] || (_cache[89] = _withKeys($event => (_ctx.loadLogs(0)), ["enter"]))
-            }, null, 40 /* PROPS, NEED_HYDRATION */, _hoisted_284), [
+              onKeyup: _cache[90] || (_cache[90] = _withKeys($event => (_ctx.loadLogs(0)), ["enter"]))
+            }, null, 40 /* PROPS, NEED_HYDRATION */, _hoisted_287), [
               [
                 _vModelText,
                 _ctx.logFilters.q,
@@ -2382,34 +2400,34 @@ window.gatewayRender = function render(_ctx, _cache) {
               ]
             ]),
             _withDirectives(_createElementVNode("select", {
-              "onUpdate:modelValue": _cache[90] || (_cache[90] = $event => ((_ctx.logFilters.status) = $event)),
+              "onUpdate:modelValue": _cache[91] || (_cache[91] = $event => ((_ctx.logFilters.status) = $event)),
               "aria-label": _ctx.t('table.status')
             }, [
-              _createElementVNode("option", _hoisted_286, _toDisplayString(_ctx.t('logs.allStatus')), 1 /* TEXT */),
-              _cache[106] || (_cache[106] = _createStaticVNode("<option value=\"200\">2xx</option><option value=\"400\">400</option><option value=\"401\">401</option><option value=\"429\">429</option><option value=\"499\">499</option><option value=\"500\">500</option><option value=\"502\">502</option><option value=\"503\">503</option>", 8))
-            ], 8 /* PROPS */, _hoisted_285), [
+              _createElementVNode("option", _hoisted_289, _toDisplayString(_ctx.t('logs.allStatus')), 1 /* TEXT */),
+              _cache[107] || (_cache[107] = _createStaticVNode("<option value=\"200\">2xx</option><option value=\"400\">400</option><option value=\"401\">401</option><option value=\"429\">429</option><option value=\"499\">499</option><option value=\"500\">500</option><option value=\"502\">502</option><option value=\"503\">503</option>", 8))
+            ], 8 /* PROPS */, _hoisted_288), [
               [_vModelSelect, _ctx.logFilters.status]
             ]),
             _withDirectives(_createElementVNode("select", {
-              "onUpdate:modelValue": _cache[91] || (_cache[91] = $event => ((_ctx.logFilters.providerId) = $event)),
+              "onUpdate:modelValue": _cache[92] || (_cache[92] = $event => ((_ctx.logFilters.providerId) = $event)),
               "aria-label": _ctx.t('table.provider')
             }, [
-              _createElementVNode("option", _hoisted_288, _toDisplayString(_ctx.t('logs.allProviders')), 1 /* TEXT */),
+              _createElementVNode("option", _hoisted_291, _toDisplayString(_ctx.t('logs.allProviders')), 1 /* TEXT */),
               (_openBlock(true), _createElementBlock(_Fragment, null, _renderList(_ctx.providers, (provider) => {
                 return (_openBlock(), _createElementBlock("option", {
                   key: provider.id,
                   value: provider.id
-                }, _toDisplayString(provider.name), 9 /* TEXT, PROPS */, _hoisted_289))
+                }, _toDisplayString(provider.name), 9 /* TEXT, PROPS */, _hoisted_292))
               }), 128 /* KEYED_FRAGMENT */))
-            ], 8 /* PROPS */, _hoisted_287), [
+            ], 8 /* PROPS */, _hoisted_290), [
               [_vModelSelect, _ctx.logFilters.providerId]
             ]),
             _withDirectives(_createElementVNode("input", {
-              "onUpdate:modelValue": _cache[92] || (_cache[92] = $event => ((_ctx.logFilters.model) = $event)),
+              "onUpdate:modelValue": _cache[93] || (_cache[93] = $event => ((_ctx.logFilters.model) = $event)),
               "aria-label": _ctx.t('table.model'),
               placeholder: _ctx.t('table.model'),
-              onKeyup: _cache[93] || (_cache[93] = _withKeys($event => (_ctx.loadLogs(0)), ["enter"]))
-            }, null, 40 /* PROPS, NEED_HYDRATION */, _hoisted_290), [
+              onKeyup: _cache[94] || (_cache[94] = _withKeys($event => (_ctx.loadLogs(0)), ["enter"]))
+            }, null, 40 /* PROPS, NEED_HYDRATION */, _hoisted_293), [
               [
                 _vModelText,
                 _ctx.logFilters.model,
@@ -2420,20 +2438,20 @@ window.gatewayRender = function render(_ctx, _cache) {
             _createElementVNode("button", {
               type: "button",
               disabled: _ctx.logsLoading,
-              onClick: _cache[94] || (_cache[94] = $event => (_ctx.loadLogs(0)))
-            }, _toDisplayString(_ctx.t('logs.apply')), 9 /* TEXT, PROPS */, _hoisted_291),
+              onClick: _cache[95] || (_cache[95] = $event => (_ctx.loadLogs(0)))
+            }, _toDisplayString(_ctx.t('logs.apply')), 9 /* TEXT, PROPS */, _hoisted_294),
             _createElementVNode("button", {
               class: "ghost",
               type: "button",
-              onClick: _cache[95] || (_cache[95] = (...args) => (_ctx.exportLogs && _ctx.exportLogs(...args)))
+              onClick: _cache[96] || (_cache[96] = (...args) => (_ctx.exportLogs && _ctx.exportLogs(...args)))
             }, _toDisplayString(_ctx.t('logs.export')), 1 /* TEXT */),
             _createElementVNode("button", {
               class: "danger",
               type: "button",
-              onClick: _cache[96] || (_cache[96] = (...args) => (_ctx.clearLogs && _ctx.clearLogs(...args)))
+              onClick: _cache[97] || (_cache[97] = (...args) => (_ctx.clearLogs && _ctx.clearLogs(...args)))
             }, _toDisplayString(_ctx.t('logs.clear')), 1 /* TEXT */)
           ]),
-          _createElementVNode("div", _hoisted_292, [
+          _createElementVNode("div", _hoisted_295, [
             _createElementVNode("table", null, [
               _createElementVNode("thead", null, [
                 _createElementVNode("tr", null, [
@@ -2441,9 +2459,9 @@ window.gatewayRender = function render(_ctx, _cache) {
                   _createElementVNode("th", null, _toDisplayString(_ctx.t('table.protocol')), 1 /* TEXT */),
                   _createElementVNode("th", null, _toDisplayString(_ctx.t('table.model')), 1 /* TEXT */),
                   _createElementVNode("th", null, _toDisplayString(_ctx.t('table.provider')), 1 /* TEXT */),
-                  _cache[107] || (_cache[107] = _createElementVNode("th", null, "Key", -1 /* CACHED */)),
+                  _cache[108] || (_cache[108] = _createElementVNode("th", null, "Key", -1 /* CACHED */)),
                   _createElementVNode("th", null, _toDisplayString(_ctx.t('table.status')), 1 /* TEXT */),
-                  _cache[108] || (_cache[108] = _createElementVNode("th", null, "Tokens", -1 /* CACHED */)),
+                  _cache[109] || (_cache[109] = _createElementVNode("th", null, "Tokens", -1 /* CACHED */)),
                   _createElementVNode("th", null, _toDisplayString(_ctx.t('table.latency')), 1 /* TEXT */),
                   _createElementVNode("th", null, _toDisplayString(_ctx.t('table.error')), 1 /* TEXT */)
                 ])
@@ -2455,16 +2473,16 @@ window.gatewayRender = function render(_ctx, _cache) {
                   }, [
                     _createElementVNode("td", null, _toDisplayString(_ctx.formatGatewayTime(log.createdAt)), 1 /* TEXT */),
                     _createElementVNode("td", null, _toDisplayString(log.inboundProtocol), 1 /* TEXT */),
-                    _createElementVNode("td", _hoisted_293, [
+                    _createElementVNode("td", _hoisted_296, [
                       _createElementVNode("code", null, _toDisplayString(log.model || '-'), 1 /* TEXT */),
                       (log.upstreamModel && log.upstreamModel !== log.model)
-                        ? (_openBlock(), _createElementBlock("small", _hoisted_294, _toDisplayString(log.upstreamModel), 1 /* TEXT */))
+                        ? (_openBlock(), _createElementBlock("small", _hoisted_297, _toDisplayString(log.upstreamModel), 1 /* TEXT */))
                         : _createCommentVNode("v-if", true),
                       (log.routeId)
-                        ? (_openBlock(), _createElementBlock("small", _hoisted_295, _toDisplayString(log.routeId) + " · " + _toDisplayString(log.attempts || 1) + " " + _toDisplayString(_ctx.t('logs.attempts')), 1 /* TEXT */))
+                        ? (_openBlock(), _createElementBlock("small", _hoisted_298, _toDisplayString(log.routeId) + " · " + _toDisplayString(log.attempts || 1) + " " + _toDisplayString(_ctx.t('logs.attempts')), 1 /* TEXT */))
                         : _createCommentVNode("v-if", true),
                       (log.attemptTrace?.length)
-                        ? (_openBlock(), _createElementBlock("details", _hoisted_296, [
+                        ? (_openBlock(), _createElementBlock("details", _hoisted_299, [
                             _createElementVNode("summary", null, _toDisplayString(_ctx.t('logs.trace')) + " (" + _toDisplayString(log.attemptTrace.length) + _toDisplayString(log.traceTruncated ? '+' : '') + ")", 1 /* TEXT */),
                             (_openBlock(true), _createElementBlock(_Fragment, null, _renderList(log.attemptTrace, (attempt) => {
                               return (_openBlock(), _createElementBlock("div", {
@@ -2477,7 +2495,7 @@ window.gatewayRender = function render(_ctx, _cache) {
                               ]))
                             }), 128 /* KEYED_FRAGMENT */)),
                             (log.traceTruncated)
-                              ? (_openBlock(), _createElementBlock("small", _hoisted_297, _toDisplayString(_ctx.t('logs.traceTruncated')), 1 /* TEXT */))
+                              ? (_openBlock(), _createElementBlock("small", _hoisted_300, _toDisplayString(_ctx.t('logs.traceTruncated')), 1 /* TEXT */))
                               : _createCommentVNode("v-if", true)
                           ]))
                         : _createCommentVNode("v-if", true)
@@ -2493,20 +2511,20 @@ window.gatewayRender = function render(_ctx, _cache) {
               ])
             ])
           ]),
-          _createElementVNode("div", _hoisted_298, [
+          _createElementVNode("div", _hoisted_301, [
             _createElementVNode("button", {
               class: "ghost",
               type: "button",
               disabled: _ctx.logPage.offset <= 0 || _ctx.logsLoading,
-              onClick: _cache[97] || (_cache[97] = $event => (_ctx.loadLogs(_ctx.logPage.offset - _ctx.logPage.limit)))
-            }, _toDisplayString(_ctx.t('logs.previous')), 9 /* TEXT, PROPS */, _hoisted_299),
+              onClick: _cache[98] || (_cache[98] = $event => (_ctx.loadLogs(_ctx.logPage.offset - _ctx.logPage.limit)))
+            }, _toDisplayString(_ctx.t('logs.previous')), 9 /* TEXT, PROPS */, _hoisted_302),
             _createElementVNode("span", null, _toDisplayString(_ctx.logPage.total ? `${_ctx.logPage.offset + 1}-${Math.min(_ctx.logPage.offset + _ctx.logs.length, _ctx.logPage.total)} / ${_ctx.logPage.total}` : '0 / 0'), 1 /* TEXT */),
             _createElementVNode("button", {
               class: "ghost",
               type: "button",
               disabled: _ctx.logPage.offset + _ctx.logPage.limit >= _ctx.logPage.total || _ctx.logsLoading,
-              onClick: _cache[98] || (_cache[98] = $event => (_ctx.loadLogs(_ctx.logPage.offset + _ctx.logPage.limit)))
-            }, _toDisplayString(_ctx.t('logs.next')), 9 /* TEXT, PROPS */, _hoisted_300)
+              onClick: _cache[99] || (_cache[99] = $event => (_ctx.loadLogs(_ctx.logPage.offset + _ctx.logPage.limit)))
+            }, _toDisplayString(_ctx.t('logs.next')), 9 /* TEXT, PROPS */, _hoisted_303)
           ])
         ])
       ], 512 /* NEED_PATCH */), [
