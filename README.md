@@ -4,21 +4,21 @@
 
 ## 快速开始
 
-运行网关不需要 Node.js。最低构建版本为 Go 1.25，仓库内置并锁定 Go 1.26.5，可直接使用 `.tools/go/bin/go.exe`。只有修改管理后台模板时需要 Node.js 运行 `npm run build:admin`；编译后的静态资源已提交并内嵌进 Go 程序。
+从源码运行或构建需要 Go 1.25 或更高版本；`go.mod` 指定 Go 1.26.5 工具链，支持自动工具链下载的 Go 会按需获取该版本。运行网关本身不需要 Node.js。只有修改管理后台模板时需要 Node.js 运行 `npm run build:admin`；编译后的静态资源已提交并内嵌进 Go 程序。
 
 ```powershell
-.\.tools\go\bin\go.exe run .\cmd\gateway
+go run .\cmd\gateway
 ```
 
 或构建单文件程序：
 
 ```powershell
 New-Item -ItemType Directory -Force bin
-.\.tools\go\bin\go.exe build -buildvcs=false -o .\bin\gateway.exe .\cmd\gateway
+go build -buildvcs=false -o .\bin\gateway.exe .\cmd\gateway
 .\bin\gateway.exe
 ```
 
-也可以直接双击 `bin\gateway.exe`。当程序从 `bin` 目录双击启动时，会自动把工作目录切回项目根目录，确保配置、数据库、日志和单实例锁仍使用根目录下的 `data`。
+构建完成后，也可以直接双击 `bin\gateway.exe`。当程序从 `bin` 目录双击启动时，会自动把工作目录切回项目根目录，确保配置、数据库、日志和单实例锁仍使用根目录下的 `data`。
 
 默认地址：
 
@@ -184,7 +184,7 @@ npm run build:admin
 ## 测试
 
 ```powershell
-.\.tools\go\bin\go.exe test ./...
+go test ./...
 ```
 
 发布版本号和包名统一维护在 `release.json`。本地打包脚本默认读取该文件，发布标签必须与其中的版本号一致。
@@ -197,3 +197,7 @@ npm run build:admin
 
 烟测默认使用 `127.0.0.1:28787` 和系统临时目录启动无托盘实例，验证健康检查、后台资源、安全响应头、状态接口、日志创建和重复启动退出行为。端口被占用时会直接失败，不会终止任何既有进程；可用 `-Port` 指定其他端口。
 烟测还会验证管理 API 未带 Token 时返回 401，带 `GATEWAY_ADMIN_TOKEN` 时正常访问。
+
+## License
+
+本项目基于 [MIT License](LICENSE) 授权。
