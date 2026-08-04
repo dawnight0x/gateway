@@ -103,9 +103,13 @@ function Invoke-VersionResource([string]$Output, [string]$VersionInfo, [string]$
 
 Push-Location -LiteralPath $Root
 try {
-  & $Go run -buildvcs=false (Join-Path $Root "scripts\generate-windows-icon.go") $Icon
-  if ($LASTEXITCODE -ne 0) {
-    throw "icon generation failed with exit code $LASTEXITCODE"
+  if (-not (Test-Path -LiteralPath $Icon)) {
+    & $Go run -buildvcs=false (Join-Path $Root "scripts\generate-windows-icon.go") $Icon
+    if ($LASTEXITCODE -ne 0) {
+      throw "icon generation failed with exit code $LASTEXITCODE"
+    }
+  } else {
+    Write-Host "Using tracked icon $Icon"
   }
 
   Write-VersionedManifest $GatewayManifest "LocalAIGateway"
