@@ -21,6 +21,7 @@ import (
 
 	"local-ai-gateway/internal/config"
 	"local-ai-gateway/internal/model"
+	readinesspkg "local-ai-gateway/internal/readiness"
 	"local-ai-gateway/internal/store"
 	"local-ai-gateway/internal/upstreamhttp"
 	adminweb "local-ai-gateway/web/admin"
@@ -37,6 +38,7 @@ type providerInput struct {
 	ModelAllowlistEnabled *bool             `json:"modelAllowlistEnabled"`
 	ModelAllowlist        []string          `json:"modelAllowlist"`
 	BalancePath           *string           `json:"balancePath"`
+	FirstKey              *keyInput         `json:"firstKey"`
 }
 
 type keyInput struct {
@@ -445,12 +447,18 @@ func (s *Service) dashboard(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "failed to load model health state"})
 		return
 	}
+	readiness, readinessReason := adminReadiness(providers, keys, gatewayKeys, stats, s.cfg.Server.ProxyToken)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"service": map[string]any{
-			"status":   "ok",
-			"proxyUrl": s.cfg.PublicURL(),
-			"adminUrl": s.cfg.PublicURL() + "/admin",
-			"timezone": s.cfg.Storage.Timezone,
+			"status":                "ok",
+			"processStatus":         "running",
+			"readiness":             readiness,
+			"readinessReason":       readinessReason,
+			"ready":                 readiness == "ready" || readiness == "degraded",
+			"gatewayAuthConfigured": readinesspkg.GatewayCredentialConfigured(gatewayKeys, s.cfg.Server.ProxyToken),
+			"proxyUrl":              s.cfg.PublicURL(),
+			"adminUrl":              s.cfg.PublicURL() + "/admin",
+			"timezone":              s.cfg.Storage.Timezone,
 		},
 		"stats":          stats,
 		"providers":      providers,
@@ -465,6 +473,11 @@ func (s *Service) dashboard(w http.ResponseWriter, r *http.Request) {
 		"routing":        s.cfg.Routing,
 		"snippets":       s.snippets(),
 	})
+}
+
+func adminReadiness(providers []model.Provider, keys []model.Key, gatewayKeys []model.GatewayKey, stats model.Stats, proxyToken string) (string, string) {
+	result := readinesspkg.Evaluate(providers, keys, gatewayKeys, stats, proxyToken)
+	return result.State, result.Reason
 }
 
 func (s *Service) gatewayKeys(w http.ResponseWriter, r *http.Request, parts []string) {
@@ -642,6 +655,37 @@ func (s *Service) providers(w http.ResponseWriter, r *http.Request, parts []stri
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
 			return
 		}
+		if r.Method == http.MethodPost && input.FirstKey != nil && strings.TrimSpace(input.FirstKey.Secret) != "" {
+			firstKey := model.Key{
+				ID:              input.FirstKey.ID,
+				ProviderID:      p.ID,
+				Name:            strings.TrimSpace(input.FirstKey.Name),
+				Secret:          strings.TrimSpace(input.FirstKey.Secret),
+				Enabled:         true,
+				ManualPreferred: false,
+			}
+			if input.FirstKey.Priority != nil {
+				firstKey.Priority = *input.FirstKey.Priority
+			}
+			if input.FirstKey.Enabled != nil {
+				firstKey.Enabled = *input.FirstKey.Enabled
+			}
+			if input.FirstKey.ManualPreferred != nil {
+				firstKey.ManualPreferred = *input.FirstKey.ManualPreferred
+			}
+			if err := validateProviderKeyForCreate(firstKey); err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+				return
+			}
+			item, key, err := s.store.UpsertProviderWithKey(r.Context(), p, firstKey)
+			if err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+				return
+			}
+			s.scheduleProviderModelDiscovery(item.ID)
+			writeJSON(w, http.StatusOK, map[string]any{"provider": item, "key": key})
+			return
+		}
 		item, err := s.store.UpsertProvider(r.Context(), p)
 		if err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
@@ -662,6 +706,16 @@ func (s *Service) providers(w http.ResponseWriter, r *http.Request, parts []stri
 	default:
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
 	}
+}
+
+func validateProviderKeyForCreate(k model.Key) error {
+	if strings.TrimSpace(k.Name) == "" {
+		return errors.New("key name is required")
+	}
+	if strings.TrimSpace(k.Secret) == "" {
+		return errors.New("key secret is required")
+	}
+	return validatePriority("key", k.Priority)
 }
 
 func (s *Service) keys(w http.ResponseWriter, r *http.Request, parts []string) {
@@ -710,6 +764,15 @@ func (s *Service) keys(w http.ResponseWriter, r *http.Request, parts []string) {
 			return
 		}
 		writeJSON(w, http.StatusOK, findKey(keys, id))
+		return
+	}
+	if r.Method == http.MethodPost && id == "test-all" && action == "" {
+		results, err := s.testAllUpstreamKeys(r.Context())
+		if err != nil {
+			writeAdminStoreError(w, "test upstream keys", err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"results": results})
 		return
 	}
 	switch r.Method {

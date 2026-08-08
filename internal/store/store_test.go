@@ -28,6 +28,33 @@ func openTestStore(t *testing.T, options Options) *Store {
 	return st
 }
 
+func TestUpsertProviderWithKeyRollsBackProviderWhenKeyWriteFails(t *testing.T) {
+	st := openTestStore(t, Options{Timezone: "Asia/Singapore"})
+	ctx := context.Background()
+	if _, err := st.db.ExecContext(ctx, `
+		CREATE TRIGGER reject_test_key BEFORE INSERT ON keys
+		BEGIN
+			SELECT RAISE(ABORT, 'forced key failure');
+		END
+	`); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err := st.UpsertProviderWithKey(ctx,
+		model.Provider{ID: "atomic", Name: "Atomic", Type: model.ProviderOpenAICompatible, BaseURL: "https://atomic.test", Enabled: true},
+		model.Key{Name: "Primary", Secret: "secret", Enabled: true},
+	)
+	if err == nil {
+		t.Fatal("expected key write to fail")
+	}
+	var providers int
+	if err := st.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM providers WHERE id='atomic'`).Scan(&providers); err != nil {
+		t.Fatal(err)
+	}
+	if providers != 0 {
+		t.Fatalf("provider count = %d, want 0 after transaction rollback", providers)
+	}
+}
+
 func TestMaskSecret(t *testing.T) {
 	tests := map[string]string{
 		"sk-1234567890obsc":  "sk-*****obsc",

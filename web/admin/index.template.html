@@ -10,6 +10,33 @@
 </head>
 <body>
   <div id="app" v-cloak>
+    <div v-if="authRequired" class="auth-overlay">
+      <form class="auth-dialog" @submit.prevent="submitAdminLogin">
+        <div class="auth-dialog-head">
+          <img class="brand-mark" src="/admin/assets/app-icon.svg" alt="">
+          <button class="ghost" type="button" @click="setLang(lang === 'zh' ? 'en' : 'zh')">{{ lang === 'zh' ? 'English' : '中文' }}</button>
+        </div>
+        <div>
+          <p class="eyebrow">Local AI Gateway</p>
+          <h1>{{ t('auth.title') }}</h1>
+          <p>{{ t('auth.copy') }}</p>
+        </div>
+        <label>
+          <span>{{ t('auth.tokenLabel') }}</span>
+          <input v-model.trim="authForm.token" type="password" autocomplete="current-password" autofocus :placeholder="t('auth.tokenPlaceholder')">
+        </label>
+        <div v-if="authError" class="form-error" role="alert">{{ authError }}</div>
+        <button type="submit" :disabled="authSubmitting">{{ authSubmitting ? t('auth.signingIn') : t('auth.signIn') }}</button>
+      </form>
+    </div>
+
+    <div class="notice-stack" aria-live="polite">
+      <div v-for="notice in notices" :key="notice.id" :class="['notice', `is-${notice.type}`]">
+        <span>{{ notice.message }}</span>
+        <button type="button" :aria-label="t('action.close')" @click="dismissNotice(notice.id)">×</button>
+      </div>
+    </div>
+
     <aside class="sidebar">
       <div class="brand">
         <img class="brand-mark" src="/admin/assets/app-icon.svg" alt="">
@@ -27,10 +54,10 @@
       </nav>
 
       <div class="side-status">
-        <span class="status-dot" :class="{muted: !dashboard}"></span>
+        <span class="status-dot" :class="dashboard ? serviceReadinessClass : 'muted'"></span>
         <div>
-          <strong>{{ dashboard?.service?.status || '-' }}</strong>
-          <small>{{ dashboard?.service?.proxyUrl || `http://localhost:${port}` }}</small>
+          <strong>{{ dashboard ? serviceReadinessLabel : '-' }}</strong>
+          <small>{{ dashboard ? serviceReadinessReason : t('service.reason.unknown') }}</small>
         </div>
       </div>
     </aside>
@@ -62,6 +89,7 @@
             <p>{{ t('dashboard.gatewayCopy') }}</p>
           </div>
           <div class="protocol-strip">
+            <span :class="['readiness-pill', serviceReadinessClass]">{{ serviceReadinessLabel }}</span>
             <span>OpenAI</span>
             <span>Anthropic</span>
             <span>Gemini</span>
@@ -73,6 +101,19 @@
             <strong>{{ card.value }}</strong>
           </article>
         </div>
+        <article v-if="!setupComplete" class="setup-progress">
+          <div>
+            <p class="eyebrow">{{ t('setup.progressEyebrow') }}</p>
+            <h2>{{ t('setup.progressTitle') }}</h2>
+          </div>
+          <div class="setup-progress-steps">
+            <button v-for="step in setupSteps" :key="step.id" class="setup-progress-step" :class="{done: step.done}" type="button" :disabled="step.done" @click="openSetupStep(step)">
+              <span>{{ step.done ? '✓' : '→' }}</span>
+              <strong>{{ t(step.label) }}</strong>
+              <small>{{ t(step.done ? 'setup.stepDone' : 'setup.stepOpen') }}</small>
+            </button>
+          </div>
+        </article>
         <div class="split">
           <article class="panel">
             <div class="panel-title">
@@ -133,8 +174,13 @@
             <div class="panel-title section-actions">
               <div class="panel-actions">
                 <button class="ghost" type="button" @click="refreshBalances" :disabled="balanceRefreshing">{{ balanceRefreshing ? t('action.refreshingBalance') : t('action.refreshBalance') }}</button>
+                <button class="ghost" type="button" @click="testAllKeys" :disabled="testingAllKeys || !keys.length">{{ testingAllKeys ? t('action.testingAllKeys') : t('action.testAllKeys') }}</button>
                 <button type="button" @click="openProviderForm">{{ t('action.addProvider') }}</button>
               </div>
+          </div>
+          <div v-if="bulkTestSummary" class="bulk-test-summary" role="status">
+            <strong>{{ t('keyTest.bulkComplete') }}</strong>
+            <span>{{ t('keyTest.bulkSummary', bulkTestSummary) }}</span>
           </div>
           <div class="provider-summary-grid">
             <div class="summary-card">
@@ -235,7 +281,7 @@
             </details>
             <div class="form-actions">
               <button class="ghost" type="button" data-testid="cancel-provider" @click="cancelProviderForm">{{ t('action.cancel') }}</button>
-              <button type="submit">{{ t(providerForm.editingId ? 'action.updateProvider' : 'action.saveProvider') }}</button>
+              <button type="submit" :disabled="actionBusy">{{ t(providerForm.editingId ? 'action.updateProvider' : 'action.saveProvider') }}</button>
             </div>
           </form>
           <div class="provider-board">
@@ -289,7 +335,7 @@
                 </details>
                 <div class="form-actions">
                   <button class="ghost" type="button" data-testid="cancel-provider" @click="cancelProviderForm">{{ t('action.cancel') }}</button>
-                  <button type="submit">{{ t('action.updateProvider') }}</button>
+                  <button type="submit" :disabled="actionBusy">{{ t('action.updateProvider') }}</button>
                 </div>
               </form>
               <div class="provider-meta-grid">
@@ -353,7 +399,7 @@
                 <label class="check"><input v-model="keyForm.enabled" type="checkbox"> {{ t('status.enabled') }}</label>
                 <div class="form-actions">
                   <button class="ghost" type="button" data-testid="cancel-key" @click="cancelKeyForm">{{ t('action.cancel') }}</button>
-                  <button type="submit">{{ t('action.saveKey') }}</button>
+                  <button type="submit" :disabled="actionBusy">{{ t('action.saveKey') }}</button>
                 </div>
               </form>
               <div v-if="providerKeys(p.id).length" class="key-stack">
@@ -456,7 +502,7 @@
                     </section>
                     <div class="form-actions">
                       <button class="ghost" type="button" data-testid="cancel-key" @click="cancelKeyForm">{{ t('action.cancel') }}</button>
-                      <button type="submit">{{ t('action.updateKey') }}</button>
+                      <button type="submit" :disabled="actionBusy">{{ t('action.updateKey') }}</button>
                     </div>
                   </form>
                   <div class="key-test-row">
@@ -602,7 +648,7 @@
             <button class="ghost add-route-model-button" type="button" @click="addRouteModel">+ {{ t('action.addFallbackModel') }}</button>
             <div class="form-actions model-route-actions">
               <button class="ghost" type="button" @click="cancelModelRouteForm">{{ t('action.cancel') }}</button>
-              <button type="submit">{{ t('action.saveModelRoute') }}</button>
+              <button type="submit" :disabled="actionBusy">{{ t('action.saveModelRoute') }}</button>
             </div>
           </form>
 
@@ -665,7 +711,7 @@
           <form class="form-grid gateway-key-form" @submit.prevent="createGatewayKey">
             <input v-model.trim="gatewayKeyForm.name" :placeholder="t('placeholder.gatewayKeyName')">
             <div class="form-actions">
-              <button type="submit">{{ t('action.addGatewayKey') }}</button>
+              <button type="submit" :disabled="actionBusy">{{ t('action.addGatewayKey') }}</button>
             </div>
           </form>
           <div v-if="createdGatewayKey?.plaintext" class="flow-hint">
@@ -677,6 +723,7 @@
               :class="copyButtonClass('createdGatewayKey')"
               @click="copyText(createdGatewayKey.plaintext, 'createdGatewayKey')"
             >{{ copyButtonText('createdGatewayKey') }}</button>
+            <button class="ghost" type="button" @click="openSetup">{{ t('action.useInSetup') }}</button>
           </div>
           <div class="flow-hint">
             <strong>{{ t('gateway.compatTitle') }}</strong>
@@ -762,7 +809,7 @@
                 <label class="check"><input v-model="routing.allowInsecureUpstreams" type="checkbox"> {{ t('routing.allowInsecureUpstreams') }}</label>
               </div>
             </div>
-            <div class="form-actions"><button type="submit">{{ t('action.save') }}</button></div>
+            <div class="form-actions"><button type="submit" :disabled="actionBusy">{{ t('action.save') }}</button></div>
           </form>
           <div v-if="routingMessage" class="form-success" role="status">{{ routingMessage }}</div>
           <div class="panel-title maintenance-actions">
@@ -775,7 +822,7 @@
           <form class="portable-backup-form" @submit.prevent="downloadPortableBackup">
             <label><span>{{ t('maintenance.passphrase') }}</span><input v-model="backupPassphrase" type="password" minlength="12" autocomplete="new-password" required></label>
             <label><span>{{ t('maintenance.confirmPassphrase') }}</span><input v-model="backupPassphraseConfirm" type="password" minlength="12" autocomplete="new-password" required></label>
-            <button type="submit">{{ t('maintenance.downloadPortableBackup') }}</button>
+            <button type="submit" :disabled="actionBusy">{{ t('maintenance.downloadPortableBackup') }}</button>
           </form>
           <div v-if="maintenanceMessage" class="form-success" role="status">{{ maintenanceMessage }}</div>
         </article>
@@ -790,8 +837,15 @@
             <strong>{{ t('setup.title') }}</strong>
             <span>{{ t('setup.copy') }}</span>
           </div>
+          <div v-if="setupNeedsGatewayKey" class="setup-warning" role="status">
+            <div>
+              <strong>{{ t('setup.gatewayKeyRequired') }}</strong>
+              <span>{{ t('setup.gatewayKeyRequiredCopy') }}</span>
+            </div>
+            <button type="button" @click="setActiveSection('keys')">{{ t('action.addGatewayKey') }}</button>
+          </div>
           <div class="snippet-grid">
-            <div v-for="(value, name) in snippets" :key="name" class="snippet">
+            <div v-for="(value, name) in setupSnippets" :key="name" class="snippet">
               <div class="snippet-head">
                 <h3>{{ name }}</h3>
                 <button
@@ -823,6 +877,7 @@
             <button type="button" :disabled="logsLoading" @click="loadLogs(0)">{{ t('logs.apply') }}</button>
             <button class="ghost" type="button" @click="exportLogs">{{ t('logs.export') }}</button>
             <button class="danger" type="button" @click="clearLogs">{{ t('logs.clear') }}</button>
+            <label class="check log-auto-refresh"><input v-model="logsAutoRefresh" type="checkbox" @change="syncLogsAutoRefresh"> {{ t('logs.autoRefresh') }}</label>
           </div>
           <div class="table-wrap">
             <table>
@@ -863,6 +918,24 @@
         </article>
       </section>
     </main>
+
+    <div v-if="confirmDialog.open" class="modal-overlay" @click.self="finishConfirmDialog(false)">
+      <form class="confirm-dialog" role="dialog" aria-modal="true" @submit.prevent="finishConfirmDialog(true)">
+        <div>
+          <p class="eyebrow">Local AI Gateway</p>
+          <h2>{{ confirmDialog.title }}</h2>
+          <p>{{ confirmDialog.message }}</p>
+        </div>
+        <label v-if="confirmDialog.requiredId">
+          <span>{{ t('confirm.typeId', { id: confirmDialog.requiredId }) }}</span>
+          <input v-model="confirmDialog.typedId" autocomplete="off" :placeholder="confirmDialog.requiredId" autofocus>
+        </label>
+        <div class="form-actions">
+          <button class="ghost" type="button" @click="finishConfirmDialog(false)">{{ t('action.cancel') }}</button>
+          <button :class="{danger: confirmDialog.destructive}" type="submit" :disabled="!!confirmDialog.requiredId && confirmDialog.typedId !== confirmDialog.requiredId">{{ t('action.confirm') }}</button>
+        </div>
+      </form>
+    </div>
   </div>
   <script src="/admin/assets/vendor/vue.runtime.global.prod.js"></script>
   <script src="/admin/assets/i18n.js"></script>

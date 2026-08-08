@@ -54,6 +54,9 @@ func TestFormatStatusLine(t *testing.T) {
 	}{
 		{name: "healthy", in: Status{Healthy: true}, want: "运行中: localhost"},
 		{name: "cooling keys", in: Status{Healthy: true, FailedKeys: 2}, want: "运行中: localhost (2 个 key 冷却)"},
+		{name: "setup required", in: Status{Healthy: true, Readiness: "unconfigured"}, want: "待配置: localhost"},
+		{name: "unavailable", in: Status{Healthy: true, Readiness: "unavailable"}, want: "不可用: localhost"},
+		{name: "degraded", in: Status{Healthy: true, Readiness: "degraded", FailedKeys: 2}, want: "部分可用: localhost (2 个 key 冷却)"},
 		{name: "unhealthy", in: Status{Healthy: false}, want: "状态异常: localhost"},
 		{name: "error", in: Status{Healthy: true, Error: "db failed"}, want: "状态异常: 无法读取"},
 	}

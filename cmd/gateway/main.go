@@ -21,6 +21,7 @@ import (
 	"local-ai-gateway/internal/config"
 	"local-ai-gateway/internal/desktop"
 	"local-ai-gateway/internal/proxy"
+	"local-ai-gateway/internal/readiness"
 	"local-ai-gateway/internal/router"
 	"local-ai-gateway/internal/store"
 	"local-ai-gateway/internal/tray"
@@ -194,14 +195,30 @@ func run() (runErr error) {
 		statusProvider := func() tray.Status {
 			stats, err := db.Stats(context.Background())
 			if err != nil {
-				return tray.Status{Healthy: true, Error: err.Error()}
+				return tray.Status{Healthy: false, Error: err.Error()}
 			}
+			ctx := context.Background()
+			providers, providersErr := db.ListProviders(ctx)
+			keys, keysErr := db.ListKeys(ctx)
+			gatewayKeys, gatewayKeysErr := db.ListGatewayKeys(ctx)
+			if providersErr != nil {
+				return tray.Status{Healthy: false, Error: providersErr.Error()}
+			}
+			if keysErr != nil {
+				return tray.Status{Healthy: false, Error: keysErr.Error()}
+			}
+			if gatewayKeysErr != nil {
+				return tray.Status{Healthy: false, Error: gatewayKeysErr.Error()}
+			}
+			state := readiness.Evaluate(providers, keys, gatewayKeys, stats, cfg.Server.ProxyToken)
 			return tray.Status{
-				Healthy:       true,
-				ActiveKeys:    stats.ActiveKeys,
-				FailedKeys:    stats.FailedKeys,
-				TodayRequests: stats.TodayRequests,
-				TodayTokens:   stats.TodayTokens,
+				Healthy:         true,
+				Readiness:       state.State,
+				ReadinessReason: state.Reason,
+				ActiveKeys:      stats.ActiveKeys,
+				FailedKeys:      stats.FailedKeys,
+				TodayRequests:   stats.TodayRequests,
+				TodayTokens:     stats.TodayTokens,
 			}
 		}
 		fatalServerErr := make(chan error, 1)

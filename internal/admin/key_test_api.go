@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"local-ai-gateway/internal/model"
@@ -95,6 +96,42 @@ func (s *Service) testUpstreamKey(ctx context.Context, id string) keyTestResult 
 		last = result
 	}
 	return last
+}
+
+func (s *Service) testAllUpstreamKeys(ctx context.Context) ([]keyTestResult, error) {
+	keys, err := s.store.ListKeys(ctx)
+	if err != nil {
+		return nil, err
+	}
+	results := make([]keyTestResult, len(keys))
+	if len(keys) == 0 {
+		return results, nil
+	}
+	jobs := make(chan int)
+	workers := minInt(len(keys), 4)
+	var wg sync.WaitGroup
+	for worker := 0; worker < workers; worker++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for index := range jobs {
+				results[index] = s.testUpstreamKey(ctx, keys[index].ID)
+			}
+		}()
+	}
+	for index := range keys {
+		jobs <- index
+	}
+	close(jobs)
+	wg.Wait()
+	return results, nil
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 func (s *Service) tryTestKeyPath(ctx context.Context, key model.Key, path string) keyTestResult {

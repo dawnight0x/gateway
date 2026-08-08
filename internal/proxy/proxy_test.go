@@ -874,6 +874,42 @@ func TestStatusAndMetricsRequireGatewayAuth(t *testing.T) {
 	}
 }
 
+func TestReadyReflectsUsableGatewayConfiguration(t *testing.T) {
+	ctx := context.Background()
+	st := testStore(t)
+	gw := testGateway(t, st, config.Default())
+	defer gw.Close()
+
+	res, err := http.Get(gw.URL + "/ready")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(res.Body)
+	_ = res.Body.Close()
+	if res.StatusCode != http.StatusServiceUnavailable || !strings.Contains(string(body), `"reason":"no_providers"`) {
+		t.Fatalf("unconfigured readiness status = %d body = %s", res.StatusCode, body)
+	}
+
+	if _, err := st.UpsertProvider(ctx, model.Provider{ID: "provider", Name: "provider", Type: model.ProviderOpenAICompatible, BaseURL: "https://provider.example", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.UpsertKey(ctx, model.Key{ID: "key", ProviderID: "provider", Name: "key", Secret: "secret", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.CreateGatewayKey(ctx, "client"); err != nil {
+		t.Fatal(err)
+	}
+	res, err = http.Get(gw.URL + "/ready")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ = io.ReadAll(res.Body)
+	_ = res.Body.Close()
+	if res.StatusCode != http.StatusOK || !strings.Contains(string(body), `"status":"ready"`) || !strings.Contains(string(body), `"ready":true`) {
+		t.Fatalf("configured readiness status = %d body = %s", res.StatusCode, body)
+	}
+}
+
 func TestProxyRejectsQueryStringGatewayKey(t *testing.T) {
 	ctx := context.Background()
 	st := testStore(t)

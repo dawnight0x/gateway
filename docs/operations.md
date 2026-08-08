@@ -46,6 +46,8 @@ export GATEWAY_BACKUP_PASSPHRASE='your-backup-passphrase'
 
 ## 可观测性
 
+`/health` 是进程存活探针，只检查 SQLite 是否可访问；`/ready` 是面向编排和启动脚本的可用性探针，会在尚未配置 Provider、没有可用上游 Key 或没有客户端 Gateway Key 时返回 `503`，正常和降级可用时返回 `200`。需要带 Gateway Key 的详细状态可请求 `/status`，其中 `service.readiness` 与后台仪表盘保持一致。
+
 `/metrics` 提供 Key 数量、冷却状态、今日请求/Token、请求日志丢弃、当前并发、上游尝试、重试和过载拒绝指标。今日请求/Token 使用独立日聚合表，即使关闭详细请求日志也会保留。请求可通过响应头 `X-Gateway-Request-ID` 与后台请求日志关联。后台日志保存逐次路由轨迹，可展开查看每次 Provider、Key、实际上游模型、上游协议、状态、耗时和错误类型；轨迹最多保存 256 条并明确标记截断。
 
 过载返回 `503 gateway_busy` 和 `Retry-After`。先检查 `gateway_in_flight_requests` 与三级并发配置，再决定扩容 Key、缩短上游超时或提高限制。不要仅通过开启模糊重试处理超时；该选项可能导致重复生成与重复计费。

@@ -172,8 +172,7 @@ test('provider form saves the provider and its first key before refreshing', asy
   const harness = createHarness({
     fetchImpl: async (url, options = {}) => {
       requests.push({ url, options });
-      if (url === '/admin/api/providers') return response(provider);
-      if (url === '/admin/api/keys') return response({ id: 'acme-primary' });
+      if (url === '/admin/api/providers') return response({ provider, key: { id: 'acme-primary' } });
       if (url === '/admin/api/dashboard') return response({ providers: [provider], keys: [] });
       return response({});
     },
@@ -188,12 +187,80 @@ test('provider form saves the provider and its first key before refreshing', asy
   const providerRequest = requests.find((item) => item.url === '/admin/api/providers');
   const keyRequest = requests.find((item) => item.url === '/admin/api/keys');
   assert.equal(providerRequest.options.method, 'POST');
-  assert.equal(JSON.parse(providerRequest.options.body).name, 'Acme');
-  assert.equal(keyRequest.options.method, 'POST');
-  assert.deepEqual(JSON.parse(keyRequest.options.body), {
-    providerId: 'acme', name: 'Primary', secret: 'sk-acme', priority: 3, enabled: true,
+  assert.deepEqual(JSON.parse(providerRequest.options.body).firstKey, {
+    name: 'Primary', secret: 'sk-acme', priority: 3, enabled: true,
   });
+  assert.equal(keyRequest, undefined);
   assert.equal(harness.exposed.providerFormOpen.value, false);
+});
+
+test('mutating actions ignore duplicate submissions while the first request is pending', async () => {
+  const pending = deferred();
+  let providerRequests = 0;
+  const provider = { id: 'once', name: 'Once', type: 'openai-compatible', baseUrl: 'https://once.example/v1', enabled: true, modelMap: {} };
+  const harness = createHarness({
+    fetchImpl: async (url) => {
+      if (url === '/admin/api/providers') {
+        providerRequests += 1;
+        return pending.promise;
+      }
+      if (url === '/admin/api/dashboard') return response({ providers: [provider], keys: [] });
+      return response({});
+    },
+  });
+  harness.exposed.openProviderForm();
+  Object.assign(harness.exposed.providerForm, { id: 'once', name: 'Once', type: 'openai-compatible', baseUrl: 'https://once.example/v1' });
+  const first = harness.exposed.saveProvider();
+  const second = harness.exposed.saveProvider();
+  assert.equal(providerRequests, 1);
+  assert.equal(harness.exposed.actionBusy.value, true);
+  pending.resolve(response(provider));
+  await Promise.all([first, second]);
+  assert.equal(harness.exposed.actionBusy.value, false);
+});
+
+test('bulk key testing merges detailed results and exposes a summary', async () => {
+  const harness = createHarness({
+    fetchImpl: async (url) => {
+      if (url === '/admin/api/keys/test-all') return response({ results: [
+        { keyId: 'key-ok', status: 'ok' },
+        { keyId: 'key-bad', status: 'auth_error' },
+      ] });
+      return response({});
+    },
+  });
+  await harness.exposed.testAllKeys();
+  assert.equal(harness.exposed.keyTestResults.value['key-ok'].status, 'ok');
+  assert.equal(harness.exposed.keyTestResults.value['key-bad'].status, 'auth_error');
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(harness.exposed.bulkTestSummary.value)),
+    { total: 2, ok: 1, failed: 1 },
+  );
+});
+
+test('one-time gateway plaintext is injected into every setup snippet', () => {
+  const harness = createHarness();
+  harness.exposed.snippets.value = {
+    openaiEnv: 'OPENAI_API_KEY=CREATE_A_GATEWAY_KEY_IN_ADMIN',
+    cursor: { baseUrl: 'http://localhost:18787/v1', key: 'CREATE_A_GATEWAY_KEY_IN_ADMIN' },
+  };
+  assert.equal(harness.exposed.setupNeedsGatewayKey.value, true);
+  harness.exposed.createdGatewayKey.value = { plaintext: 'gw_live_example' };
+  assert.equal(harness.exposed.setupNeedsGatewayKey.value, false);
+  assert.match(harness.exposed.setupSnippets.value.openaiEnv, /gw_live_example/);
+  assert.equal(harness.exposed.setupSnippets.value.cursor.key, 'gw_live_example');
+});
+
+test('authentication and destructive actions use app dialogs instead of browser prompts', () => {
+  assert.doesNotMatch(appSource, /window\.prompt\(|\bconfirm\(/);
+  assert.match(templateSource, /class="auth-dialog"/);
+  assert.match(templateSource, /class="confirm-dialog"/);
+});
+
+test('dashboard and logs expose setup progress, request count, and automatic refresh controls', () => {
+  assert.match(templateSource, /class="setup-progress"/);
+  assert.match(templateSource, /v-model="logsAutoRefresh"/);
+  assert.match(appSource, /card\.todayRequests/);
 });
 
 test('key edit and routing save send the current form state', async () => {

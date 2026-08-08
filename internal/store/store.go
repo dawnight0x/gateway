@@ -1066,6 +1066,22 @@ func (s *Store) restoreKeySuccesses(batch map[string]keySuccess) {
 }
 
 func (s *Store) UpsertProvider(ctx context.Context, p model.Provider) (model.Provider, error) {
+	p, modelMapJSON, allowlistJSON := prepareProviderForWrite(p)
+	if _, err := upsertProviderRow(ctx, s.db, p, modelMapJSON, allowlistJSON); err != nil {
+		return p, err
+	}
+	got, err := s.GetProvider(ctx, p.ID)
+	if err != nil {
+		return p, err
+	}
+	return *got, nil
+}
+
+type contextExecer interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}
+
+func prepareProviderForWrite(p model.Provider) (model.Provider, []byte, []byte) {
 	if p.ID == "" {
 		p.ID = slug(p.Name)
 	}
@@ -1092,7 +1108,11 @@ func (s *Store) UpsertProvider(ctx context.Context, p model.Provider) (model.Pro
 	}
 	p.ModelAllowlist = allowlist
 	allowlistJSON, _ := json.Marshal(allowlist)
-	_, err := s.db.ExecContext(ctx, `
+	return p, modelMapJSON, allowlistJSON
+}
+
+func upsertProviderRow(ctx context.Context, exec contextExecer, p model.Provider, modelMapJSON, allowlistJSON []byte) (sql.Result, error) {
+	return exec.ExecContext(ctx, `
 		INSERT INTO providers (id,name,type,base_url,priority,enabled,model_map,model_allowlist_enabled,model_allowlist,balance_path,updated_at)
 		VALUES (?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)
 		ON CONFLICT(id) DO UPDATE SET
@@ -1100,14 +1120,6 @@ func (s *Store) UpsertProvider(ctx context.Context, p model.Provider) (model.Pro
 			enabled=excluded.enabled,model_map=excluded.model_map,model_allowlist_enabled=excluded.model_allowlist_enabled,
 			model_allowlist=excluded.model_allowlist,balance_path=excluded.balance_path,updated_at=CURRENT_TIMESTAMP
 	`, p.ID, p.Name, p.Type, p.BaseURL, p.Priority, boolInt(p.Enabled), string(modelMapJSON), boolInt(p.ModelAllowlistEnabled), string(allowlistJSON), p.BalancePath)
-	if err != nil {
-		return p, err
-	}
-	got, err := s.GetProvider(ctx, p.ID)
-	if err != nil {
-		return p, err
-	}
-	return *got, nil
 }
 
 func (s *Store) DeleteProvider(ctx context.Context, id string) error {
@@ -1196,20 +1208,7 @@ func (s *Store) ListKeys(ctx context.Context) ([]model.Key, error) {
 }
 
 func (s *Store) UpsertKey(ctx context.Context, k model.Key) (model.Key, error) {
-	if k.ID == "" {
-		k.ID = slug(k.ProviderID + "-" + k.Name)
-	}
-	if k.Name == "" {
-		k.Name = k.ID
-	}
-	if strings.TrimSpace(k.Secret) == "" {
-		if existing, ok, err := s.getKeySecret(ctx, k.ID); err != nil {
-			return k, err
-		} else if ok {
-			k.Secret = existing
-		}
-	}
-	cipher, err := s.crypto.encrypt(k.Secret)
+	k, cipher, err := s.prepareKeyForWrite(ctx, k)
 	if err != nil {
 		return k, err
 	}
@@ -1218,12 +1217,43 @@ func (s *Store) UpsertKey(ctx context.Context, k model.Key) (model.Key, error) {
 		return k, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if k.ManualPreferred {
-		if _, err := tx.ExecContext(ctx, `UPDATE keys SET manual_preferred=0 WHERE manual_preferred=1 AND id<>?`, k.ID); err != nil {
-			return k, err
+	if err := upsertKeyRows(ctx, tx, k, cipher); err != nil {
+		return k, err
+	}
+	if err := tx.Commit(); err != nil {
+		return k, err
+	}
+	return s.reloadKey(ctx, k)
+}
+
+func (s *Store) prepareKeyForWrite(ctx context.Context, k model.Key) (model.Key, string, error) {
+	if k.ID == "" {
+		k.ID = slug(k.ProviderID + "-" + k.Name)
+	}
+	if k.Name == "" {
+		k.Name = k.ID
+	}
+	if strings.TrimSpace(k.Secret) == "" {
+		if existing, ok, err := s.getKeySecret(ctx, k.ID); err != nil {
+			return k, "", err
+		} else if ok {
+			k.Secret = existing
 		}
 	}
-	_, err = tx.ExecContext(ctx, `
+	cipher, err := s.crypto.encrypt(k.Secret)
+	if err != nil {
+		return k, "", err
+	}
+	return k, cipher, nil
+}
+
+func upsertKeyRows(ctx context.Context, exec contextExecer, k model.Key, cipher string) error {
+	if k.ManualPreferred {
+		if _, err := exec.ExecContext(ctx, `UPDATE keys SET manual_preferred=0 WHERE manual_preferred=1 AND id<>?`, k.ID); err != nil {
+			return err
+		}
+	}
+	_, err := exec.ExecContext(ctx, `
 		INSERT INTO keys (id,provider_id,name,secret_cipher,priority,enabled,manual_preferred,updated_at)
 		VALUES (?,?,?,?,?,?,?,CURRENT_TIMESTAMP)
 		ON CONFLICT(id) DO UPDATE SET
@@ -1231,27 +1261,60 @@ func (s *Store) UpsertKey(ctx context.Context, k model.Key) (model.Key, error) {
 			priority=excluded.priority,enabled=excluded.enabled,manual_preferred=excluded.manual_preferred,updated_at=CURRENT_TIMESTAMP
 	`, k.ID, k.ProviderID, k.Name, cipher, k.Priority, boolInt(k.Enabled), boolInt(k.ManualPreferred))
 	if err != nil {
-		return k, err
+		return err
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM provider_models WHERE key_id=? AND provider_id<>?`, k.ID, k.ProviderID); err != nil {
-		return k, err
+	if _, err := exec.ExecContext(ctx, `DELETE FROM provider_models WHERE key_id=? AND provider_id<>?`, k.ID, k.ProviderID); err != nil {
+		return err
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO key_state (key_id) VALUES (?)`, k.ID); err != nil {
-		return k, err
+	if _, err := exec.ExecContext(ctx, `INSERT OR IGNORE INTO key_state (key_id) VALUES (?)`, k.ID); err != nil {
+		return err
 	}
-	if err := tx.Commit(); err != nil {
-		return k, err
-	}
+	return nil
+}
+
+func (s *Store) reloadKey(ctx context.Context, fallback model.Key) (model.Key, error) {
 	keys, err := s.ListKeys(ctx)
 	if err != nil {
-		return k, err
+		return fallback, err
 	}
 	for _, item := range keys {
-		if item.ID == k.ID {
+		if item.ID == fallback.ID {
 			return item, nil
 		}
 	}
-	return k, nil
+	return fallback, nil
+}
+
+func (s *Store) UpsertProviderWithKey(ctx context.Context, p model.Provider, k model.Key) (model.Provider, model.Key, error) {
+	p, modelMapJSON, allowlistJSON := prepareProviderForWrite(p)
+	k.ProviderID = p.ID
+	k, cipher, err := s.prepareKeyForWrite(ctx, k)
+	if err != nil {
+		return p, k, err
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return p, k, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := upsertProviderRow(ctx, tx, p, modelMapJSON, allowlistJSON); err != nil {
+		return p, k, err
+	}
+	if err := upsertKeyRows(ctx, tx, k, cipher); err != nil {
+		return p, k, err
+	}
+	if err := tx.Commit(); err != nil {
+		return p, k, err
+	}
+	storedProvider, err := s.GetProvider(ctx, p.ID)
+	if err != nil {
+		return p, k, err
+	}
+	storedKey, err := s.reloadKey(ctx, k)
+	if err != nil {
+		return *storedProvider, k, err
+	}
+	return *storedProvider, storedKey, nil
 }
 
 func (s *Store) getKeySecret(ctx context.Context, id string) (string, bool, error) {

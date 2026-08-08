@@ -53,10 +53,13 @@ createApp({
     const modelPolicyDrafts = reactive({});
     const modelPolicySearch = reactive({});
     const testingKeyId = ref('');
+    const testingAllKeys = ref(false);
+    const bulkTestSummary = ref(null);
     const logs = ref([]);
     const logPage = reactive({ total: 0, limit: 50, offset: 0 });
     const logFilters = reactive({ q: '', status: '', providerId: '', keyId: '', model: '', errorType: '' });
     const logsLoading = ref(false);
+    const logsAutoRefresh = ref(localStorage.getItem('gateway.logsAutoRefresh') !== 'false');
     const routing = ref({});
     const routingAdvanced = ref(false);
     const routingMessage = ref('');
@@ -65,11 +68,18 @@ createApp({
     const backupPassphraseConfirm = ref('');
     const snippets = ref({});
     const refreshing = ref(false);
+    const actionBusy = ref(false);
     const refreshError = ref('');
     const formError = ref('');
     const legacyAdminToken = localStorage.getItem('gateway.adminToken') || '';
     localStorage.removeItem('gateway.adminToken');
     const adminToken = ref(bootAdminToken || sessionStorage.getItem('gateway.adminToken') || legacyAdminToken);
+    const authRequired = ref(!adminToken.value);
+    const authError = ref('');
+    const authSubmitting = ref(false);
+    const authForm = reactive({ token: '' });
+    const notices = ref([]);
+    const confirmDialog = reactive({ open: false, title: '', message: '', requiredId: '', typedId: '', destructive: false, resolve: null });
     if (bootAdminToken) {
       sessionStorage.setItem('gateway.adminToken', bootAdminToken);
       clearAdminTokenHash();
@@ -144,6 +154,58 @@ createApp({
       return text;
     };
 
+    const localizeError = (error) => {
+      const raw = String(error?.message || '').trim();
+      const code = String(error?.code || '').trim();
+      const knownCodes = {
+        auth_required: 'error.authRequired',
+        invalid_admin_token: 'error.authInvalid',
+        provider_required: 'error.providerRequired',
+        key_required: 'error.keyRequired',
+      };
+      if (knownCodes[code]) return t(knownCodes[code]);
+      const matches = [
+        [/invalid admin token|admin token is invalid|unauthorized/i, 'error.authInvalid'],
+        [/provider .*required|provider name|base url/i, 'error.providerRequired'],
+        [/key .*required|secret is required/i, 'error.keyRequired'],
+        [/priority must be between/i, 'error.priorityRange'],
+        [/failed to load|database|internal server/i, 'error.server'],
+      ];
+      const match = matches.find(([pattern]) => pattern.test(raw));
+      return match ? t(match[1]) : (raw || t('error.action'));
+    };
+
+    const notify = (type, message) => {
+      const id = `${Date.now()}-${Math.random()}`;
+      notices.value = [...notices.value, { id, type, message }];
+      window.setTimeout(() => {
+        notices.value = notices.value.filter((item) => item.id !== id);
+      }, 4200);
+    };
+
+    const openConfirmDialog = (message, title = t('confirm.title'), requiredId = '') => new Promise((resolve) => {
+      Object.assign(confirmDialog, {
+        open: true,
+        title,
+        message,
+        requiredId,
+        typedId: '',
+        destructive: !!requiredId,
+        resolve,
+      });
+    });
+
+    const finishConfirmDialog = (accepted) => {
+      const resolve = confirmDialog.resolve;
+      const matches = !confirmDialog.requiredId || confirmDialog.typedId === confirmDialog.requiredId;
+      Object.assign(confirmDialog, { open: false, requiredId: '', typedId: '', resolve: null });
+      if (resolve) resolve(!!accepted && matches);
+    };
+
+    const dismissNotice = (id) => {
+      notices.value = notices.value.filter((item) => item.id !== id);
+    };
+
     const api = async (path, options = {}, retryAuth = true) => {
       const headers = { 'content-type': 'application/json', ...(options.headers || {}) };
       if (adminToken.value) headers['x-admin-token'] = adminToken.value;
@@ -160,19 +222,24 @@ createApp({
           data = { error: text };
         }
       }
-      const errorMessage = typeof data?.error === 'string'
-        ? data.error
-        : data?.error?.message || res.statusText;
+      const errorValue = data?.error;
+      const errorMessage = typeof errorValue === 'string'
+        ? errorValue
+        : errorValue?.message || res.statusText;
       if (res.status === 401 && retryAuth) {
         sessionStorage.removeItem('gateway.adminToken');
         adminToken.value = '';
-        const next = window.prompt(t('auth.prompt'));
-        if (!next) throw new Error(errorMessage);
-        adminToken.value = next.trim();
-        sessionStorage.setItem('gateway.adminToken', adminToken.value);
-        return api(path, options, false);
+        authRequired.value = true;
+        authError.value = t('auth.invalid');
+        const authErrorObject = new Error('auth_required');
+        authErrorObject.code = 'auth_required';
+        throw authErrorObject;
       }
-      if (!res.ok) throw new Error(errorMessage);
+      if (!res.ok) {
+        const error = new Error(errorMessage);
+        if (typeof errorValue === 'object') error.code = errorValue?.code || '';
+        throw error;
+      }
       return data;
     };
 
@@ -182,7 +249,19 @@ createApp({
       const res = await fetch(`/admin/api/${path}`, { ...options, headers });
       if (!res.ok) {
         const message = await res.text();
-        throw new Error(message || `${res.status} ${res.statusText}`);
+        if (res.status === 401) {
+          sessionStorage.removeItem('gateway.adminToken');
+          adminToken.value = '';
+          authRequired.value = true;
+          const error = new Error('auth_required');
+          error.code = 'auth_required';
+          throw error;
+        }
+        let parsed = null;
+        try { parsed = message ? JSON.parse(message) : null; } catch { /* plain response */ }
+        const error = new Error(parsed?.error?.message || parsed?.error || message || `${res.status} ${res.statusText}`);
+        error.code = parsed?.error?.code || '';
+        throw error;
       }
       const blob = await res.blob();
       const disposition = res.headers.get('content-disposition') || '';
@@ -194,13 +273,21 @@ createApp({
       URL.revokeObjectURL(anchor.href);
     };
 
-    const runAction = async (action, errorRef = refreshError) => {
+    const runAction = async (action, errorRef = refreshError, successMessage = '') => {
+      if (actionBusy.value) return null;
+      actionBusy.value = true;
       errorRef.value = '';
       try {
-        return await action();
+        const result = await action();
+        if (successMessage) notify('success', successMessage);
+        return result;
       } catch (error) {
-        errorRef.value = error?.message || t('error.action');
+        const message = localizeError(error);
+        if (errorRef === refreshError) notify('error', message);
+        errorRef.value = message;
         return null;
+      } finally {
+        actionBusy.value = false;
       }
     };
 
@@ -233,8 +320,15 @@ createApp({
         routing.value = nextDashboard?.routing || {};
         snippets.value = nextDashboard?.snippets || {};
         if (!keyForm.providerId && providers.value.length) keyForm.providerId = providers.value[0].id;
-      })().catch((error) => {
-        refreshError.value = error?.message || t('error.refresh');
+      })().then(() => {
+        authRequired.value = false;
+        return true;
+      }).catch((error) => {
+        if (error?.code !== 'auth_required') {
+          refreshError.value = localizeError(error) || t('error.refresh');
+          notify('error', refreshError.value);
+        }
+        return false;
       }).finally(() => {
         refreshing.value = false;
         refreshPromise = null;
@@ -275,17 +369,35 @@ createApp({
       }
     };
 
+    let logRefreshTimer = null;
+    const stopLogAutoRefresh = () => {
+      if (logRefreshTimer !== null && typeof window.clearInterval === 'function') window.clearInterval(logRefreshTimer);
+      logRefreshTimer = null;
+    };
+    const startLogAutoRefresh = () => {
+      stopLogAutoRefresh();
+      if (!logsAutoRefresh.value || activeSection.value !== 'logs' || typeof window.setInterval !== 'function') return;
+      logRefreshTimer = window.setInterval(() => {
+        if (document.visibilityState !== 'hidden' && !logsLoading.value) loadLogs(logPage.offset);
+      }, 5000);
+    };
+    const syncLogsAutoRefresh = () => {
+      localStorage.setItem('gateway.logsAutoRefresh', String(logsAutoRefresh.value));
+      if (logsAutoRefresh.value) startLogAutoRefresh();
+      else stopLogAutoRefresh();
+    };
+
     const exportLogs = async () => runAction(async () => {
       await download(`logs?${logQuery({ format: 'csv', limit: 10000, offset: 0 })}`, {}, 'gateway-request-logs.csv');
     });
 
     const clearLogs = async () => {
-      if (!confirm(t('confirm.clearLogs'))) return;
+      if (!await openConfirmDialog(t('confirm.clearLogs'), t('confirm.clearLogsTitle'))) return;
       await runAction(async () => {
         await api('logs', { method: 'DELETE' });
         await refresh();
         await loadLogs(0);
-      });
+      }, refreshError, t('feedback.logsCleared'));
     };
 
     const saveRouting = async () => runAction(async () => {
@@ -318,9 +430,13 @@ createApp({
     });
 
     const logoutAdmin = async () => {
+      stopLogAutoRefresh();
       sessionStorage.removeItem('gateway.adminToken');
       localStorage.removeItem('gateway.adminToken');
       adminToken.value = '';
+      authForm.token = '';
+      authError.value = '';
+      authRequired.value = true;
       dashboard.value = null;
       providers.value = [];
       keys.value = [];
@@ -338,7 +454,31 @@ createApp({
       logs.value = [];
       routing.value = {};
       snippets.value = {};
-      refreshError.value = t('auth.loggedOut');
+      refreshError.value = '';
+      notify('success', t('auth.loggedOut'));
+    };
+
+    const submitAdminLogin = async () => {
+      const token = authForm.token.trim();
+      authError.value = '';
+      if (!token) {
+        authError.value = t('auth.required');
+        return;
+      }
+      authSubmitting.value = true;
+      adminToken.value = token;
+      sessionStorage.setItem('gateway.adminToken', token);
+      const ok = await refresh();
+      authSubmitting.value = false;
+      if (!ok) {
+        sessionStorage.removeItem('gateway.adminToken');
+        adminToken.value = '';
+        authRequired.value = true;
+        authError.value = t('auth.invalid');
+      } else {
+        authForm.token = '';
+        authError.value = '';
+      }
     };
 
     const setLang = (next) => {
@@ -360,14 +500,24 @@ createApp({
       if (window.location.hash !== `#${next}`) {
         history.pushState(null, '', `#${next}`);
       }
-      if (next === 'logs') loadLogs(0);
+      if (next === 'logs') {
+        loadLogs(0);
+        startLogAutoRefresh();
+      } else {
+        stopLogAutoRefresh();
+      }
     };
 
     const syncSectionFromHash = () => {
       const next = sectionFromHash();
       if (next === activeSection.value) return;
       activeSection.value = next;
-      if (next === 'logs') loadLogs(0);
+      if (next === 'logs') {
+        loadLogs(0);
+        startLogAutoRefresh();
+      } else {
+        stopLogAutoRefresh();
+      }
     };
 
     const toggleTheme = () => {
@@ -378,13 +528,37 @@ createApp({
     const port = computed(() => new URL(dashboard.value?.service?.proxyUrl || window.location.origin).port || (window.location.protocol === 'https:' ? '443' : '80'));
     const stats = computed(() => dashboard.value?.stats || {});
     const recentLogs = computed(() => stats.value.recent || []);
+    const serviceReadiness = computed(() => dashboard.value?.service?.readiness || 'unknown');
+    const serviceReadinessLabel = computed(() => t(`service.state.${serviceReadiness.value}`));
+    const serviceReadinessReason = computed(() => t(`service.reason.${dashboard.value?.service?.readinessReason || 'unknown'}`));
+    const serviceReadinessClass = computed(() => `is-${serviceReadiness.value}`);
+    const setupSteps = computed(() => [
+      { id: 'provider', label: 'setup.stepProvider', done: providers.value.some((item) => item.enabled) },
+      { id: 'upstreamKey', label: 'setup.stepUpstreamKey', done: keys.value.some((item) => item.enabled && item.providerEnabled) },
+      { id: 'gatewayKey', label: 'setup.stepGatewayKey', done: !!dashboard.value?.service?.gatewayAuthConfigured },
+    ]);
+    const setupComplete = computed(() => setupSteps.value.every((step) => step.done));
     const metricCards = computed(() => [
-      { label: 'card.service', value: dashboard.value?.service?.status || '-' },
+      { label: 'card.service', value: serviceReadinessLabel.value },
       { label: 'card.totalKeys', value: stats.value.totalKeys ?? 0 },
       { label: 'card.activeKeys', value: stats.value.activeKeys ?? 0 },
       { label: 'card.coolingKeys', value: stats.value.failedKeys ?? 0 },
+      { label: 'card.todayRequests', value: stats.value.todayRequests ?? 0 },
       { label: 'card.todayTokens', value: stats.value.todayTokens ?? 0 },
     ]);
+
+    const replaceSnippetKey = (value, gatewayKey) => {
+      if (typeof value === 'string') {
+        return gatewayKey ? value.replaceAll('CREATE_A_GATEWAY_KEY_IN_ADMIN', gatewayKey) : value;
+      }
+      if (Array.isArray(value)) return value.map((item) => replaceSnippetKey(item, gatewayKey));
+      if (value && typeof value === 'object') {
+        return Object.fromEntries(Object.entries(value).map(([name, item]) => [name, replaceSnippetKey(item, gatewayKey)]));
+      }
+      return value;
+    };
+    const setupSnippets = computed(() => replaceSnippetKey(snippets.value, createdGatewayKey.value?.plaintext || ''));
+    const setupNeedsGatewayKey = computed(() => JSON.stringify(setupSnippets.value).includes('CREATE_A_GATEWAY_KEY_IN_ADMIN'));
 
     const pretty = (value) => JSON.stringify(value || {}, null, 2);
 
@@ -1012,6 +1186,23 @@ createApp({
       formError.value = '';
     };
 
+    const openSetupStep = (step) => {
+      if (step.id === 'provider') {
+        openProviderForm();
+        return;
+      }
+      if (step.id === 'upstreamKey') {
+        if (!providers.value.length) {
+          openProviderForm();
+          return;
+        }
+        setActiveSection('providers');
+        openKeyForm(providers.value[0]);
+        return;
+      }
+      setActiveSection('keys');
+    };
+
     const parseModelMap = () => {
       const raw = (providerForm.modelMap || '').trim();
       if (!raw) return {};
@@ -1086,31 +1277,28 @@ createApp({
         modelMap,
       };
       if (!isEditing) providerPayload.enabled = true;
+      const firstKeySecret = providerForm.firstKeySecret.trim();
+      if (!isEditing && firstKeySecret) {
+        providerPayload.firstKey = {
+          name: providerForm.firstKeyName || `${providerForm.name}-key-1`,
+          secret: firstKeySecret,
+          priority: Number(providerForm.firstKeyPriority || 0),
+          enabled: true,
+        };
+      }
       await runAction(async () => {
-        const savedProvider = await api(isEditing ? `providers/${providerForm.editingId}` : 'providers', {
+        const savedResult = await api(isEditing ? `providers/${providerForm.editingId}` : 'providers', {
           method: isEditing ? 'PATCH' : 'POST',
           body: JSON.stringify(providerPayload),
         });
+        const savedProvider = savedResult?.provider || savedResult;
         const savedProviderId = savedProvider?.id || providerForm.id;
-        const firstKeySecret = providerForm.firstKeySecret.trim();
-        if (!isEditing && firstKeySecret) {
-          await api('keys', {
-            method: 'POST',
-            body: JSON.stringify({
-              providerId: savedProviderId,
-              name: providerForm.firstKeyName || `${savedProviderId}-key-1`,
-              secret: firstKeySecret,
-              priority: Number(providerForm.firstKeyPriority || 0),
-              enabled: true,
-            }),
-          });
-        }
         resetProviderForm();
         providerFormOpen.value = false;
         await refresh();
         const targetProvider = providers.value.find((p) => p.id === savedProviderId) || providers.value[0];
         if (!isEditing && targetProvider && !firstKeySecret) openKeyForm(targetProvider);
-      }, formError);
+      }, formError, t('feedback.providerSaved'));
     };
 
     const saveKey = async () => {
@@ -1149,7 +1337,7 @@ createApp({
         keyFormOpen.value = false;
         formError.value = '';
         await refresh();
-      }, formError);
+      }, formError, t('feedback.keySaved'));
     };
 
     const createGatewayKey = async () => {
@@ -1161,7 +1349,7 @@ createApp({
         createdGatewayKey.value = { ...item, event: 'created' };
         gatewayKeyForm.name = '';
         await refresh();
-      });
+      }, refreshError, t('feedback.gatewayKeyCreated'));
     };
 
     const refreshBalances = async () => {
@@ -1188,6 +1376,27 @@ createApp({
         });
       } finally {
         testingKeyId.value = '';
+      }
+    };
+
+    const testAllKeys = async () => {
+      if (testingAllKeys.value) return;
+      testingAllKeys.value = true;
+      try {
+        await runAction(async () => {
+          const result = await api('keys/test-all', { method: 'POST', body: '{}' });
+          const items = result?.results || [];
+          const next = { ...keyTestResults.value };
+          items.forEach((item) => { next[item.keyId] = item; });
+          keyTestResults.value = next;
+          bulkTestSummary.value = {
+            total: items.length,
+            ok: items.filter((item) => item.status === 'ok').length,
+            failed: items.filter((item) => item.status !== 'ok').length,
+          };
+        }, refreshError, t('feedback.keysTested'));
+      } finally {
+        testingAllKeys.value = false;
       }
     };
 
@@ -1236,7 +1445,7 @@ createApp({
     };
 
     const deleteProvider = async (p) => {
-      if (!confirmDelete(t('confirm.deleteProvider', { id: p.id }), p.id)) return;
+      if (!await confirmDelete(t('confirm.deleteProvider', { id: p.id }), p.id)) return;
       await runAction(async () => {
         await api(`providers/${p.id}`, { method: 'DELETE' });
         await refresh();
@@ -1251,7 +1460,7 @@ createApp({
     };
 
     const deleteKey = async (k) => {
-      if (!confirmDelete(t('confirm.deleteKey', { id: k.id }), k.id)) return;
+      if (!await confirmDelete(t('confirm.deleteKey', { id: k.id }), k.id)) return;
       await runAction(async () => {
         await api(`keys/${k.id}`, { method: 'DELETE' });
         await refresh();
@@ -1266,27 +1475,23 @@ createApp({
     };
 
     const rotateGatewayKey = async (k) => {
-      if (!confirm(t('confirm.rotateGatewayKey', { id: k.id }))) return;
+      if (!await openConfirmDialog(t('confirm.rotateGatewayKey', { id: k.id }), t('confirm.rotateTitle'))) return;
       await runAction(async () => {
         const item = await api(`gateway-keys/${k.id}/rotate`, { method: 'POST', body: '{}' });
         createdGatewayKey.value = { ...item, event: 'rotated' };
         await refresh();
-      });
+      }, refreshError, t('feedback.gatewayKeyRotated'));
     };
 
     const deleteGatewayKey = async (k) => {
-      if (!confirmDelete(t('confirm.deleteGatewayKey', { id: k.id }), k.id)) return;
+      if (!await confirmDelete(t('confirm.deleteGatewayKey', { id: k.id }), k.id)) return;
       await runAction(async () => {
         await api(`gateway-keys/${k.id}`, { method: 'DELETE' });
         await refresh();
       });
     };
 
-    const confirmDelete = (message, id) => {
-      if (!confirm(message)) return false;
-      const typed = window.prompt(t('confirm.typeId', { id }));
-      return typed === id;
-    };
+    const confirmDelete = (message, id) => openConfirmDialog(message, t('confirm.deleteTitle'), id);
 
     const preferKey = async (k) => {
       await runAction(async () => {
@@ -1308,9 +1513,10 @@ createApp({
       activeSection.value = sectionFromHash();
       window.addEventListener('hashchange', syncSectionFromHash);
       window.addEventListener('popstate', syncSectionFromHash);
-      await refresh();
-      if (activeSection.value === 'logs') {
+      if (adminToken.value) await refresh();
+      if (adminToken.value && activeSection.value === 'logs') {
         await loadLogs(0);
+        startLogAutoRefresh();
       }
     });
 
@@ -1319,10 +1525,16 @@ createApp({
       window.removeEventListener('popstate', syncSectionFromHash);
       copyTimers.forEach((timer) => window.clearTimeout(timer));
       copyTimers.clear();
+      stopLogAutoRefresh();
     });
 
     return {
       activeSection,
+      actionBusy,
+      authError,
+      authForm,
+      authRequired,
+      authSubmitting,
       currentTitle,
       dashboard,
       adminToken,
@@ -1354,15 +1566,22 @@ createApp({
       logPage,
       logFilters,
       logsLoading,
+      logsAutoRefresh,
+      syncLogsAutoRefresh,
       loadLogs,
       exportLogs,
       clearLogs,
+      confirmDialog,
+      dismissNotice,
+      finishConfirmDialog,
       logoutAdmin,
       metricCards,
       navItems,
+      notices,
       openKeyForm,
       openProviderForm,
       openSetup,
+      openSetupStep,
       port,
       pretty,
       providerKeyHints,
@@ -1444,11 +1663,22 @@ createApp({
       saveProvider,
       setActiveSection,
       setLang,
+      serviceReadinessClass,
+      serviceReadinessLabel,
+      serviceReadinessReason,
+      setupComplete,
+      setupSteps,
+      setupNeedsGatewayKey,
+      setupSnippets,
       snippets,
+      submitAdminLogin,
       t,
       theme,
       toggleTheme,
       testKey,
+      testAllKeys,
+      testingAllKeys,
+      bulkTestSummary,
       testResultText,
       testStatusClass,
       testConnectionText,

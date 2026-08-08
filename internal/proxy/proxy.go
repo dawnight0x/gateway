@@ -24,6 +24,7 @@ import (
 	"local-ai-gateway/internal/config"
 	"local-ai-gateway/internal/model"
 	"local-ai-gateway/internal/protocol"
+	"local-ai-gateway/internal/readiness"
 	"local-ai-gateway/internal/redact"
 	"local-ai-gateway/internal/router"
 	"local-ai-gateway/internal/store"
@@ -88,6 +89,7 @@ func New(st *store.Store, rt *router.Router, cfg config.Config) *Service {
 
 func (s *Service) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/health", s.health)
+	mux.HandleFunc("/ready", s.ready)
 	mux.HandleFunc("/status", s.status)
 	mux.HandleFunc("/metrics", s.metrics)
 	mux.HandleFunc("/v1/models", s.models)
@@ -591,6 +593,19 @@ func (s *Service) health(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
 }
 
+func (s *Service) ready(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, http.MethodGet, http.MethodHead) {
+		return
+	}
+	result, _, _, err := s.readinessSnapshot(r.Context())
+	if err != nil {
+		slog.Error("gateway readiness check failed", "error", err)
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"status": "unavailable", "reason": "store_error", "ready": false})
+		return
+	}
+	writeJSON(w, readiness.HTTPStatus(result), map[string]any{"status": result.State, "reason": result.Reason, "ready": result.Ready})
+}
+
 func (s *Service) status(w http.ResponseWriter, r *http.Request) {
 	if !s.authorized(r) {
 		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "invalid local gateway key"})
@@ -599,12 +614,44 @@ func (s *Service) status(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodGet) {
 		return
 	}
-	stats, err := s.store.Stats(r.Context())
+	result, stats, gatewayAuthConfigured, err := s.readinessSnapshot(r.Context())
 	if err != nil {
 		writeProxyStoreError(w, "load status statistics", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"service": map[string]any{"status": "ok", "proxyUrl": s.cfg.PublicURL(), "build": buildinfo.Current()}, "stats": stats})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"service": map[string]any{
+			"status":                "ok",
+			"processStatus":         "running",
+			"readiness":             result.State,
+			"readinessReason":       result.Reason,
+			"ready":                 result.Ready,
+			"gatewayAuthConfigured": gatewayAuthConfigured,
+			"proxyUrl":              s.cfg.PublicURL(),
+			"build":                 buildinfo.Current(),
+		},
+		"stats": stats,
+	})
+}
+
+func (s *Service) readinessSnapshot(ctx context.Context) (readiness.Result, model.Stats, bool, error) {
+	stats, err := s.store.Stats(ctx)
+	if err != nil {
+		return readiness.Result{}, stats, false, err
+	}
+	providers, err := s.store.ListProviders(ctx)
+	if err != nil {
+		return readiness.Result{}, stats, false, err
+	}
+	keys, err := s.store.ListKeys(ctx)
+	if err != nil {
+		return readiness.Result{}, stats, false, err
+	}
+	gatewayKeys, err := s.store.ListGatewayKeys(ctx)
+	if err != nil {
+		return readiness.Result{}, stats, false, err
+	}
+	return readiness.Evaluate(providers, keys, gatewayKeys, stats, s.cfg.Server.ProxyToken), stats, readiness.GatewayCredentialConfigured(gatewayKeys, s.cfg.Server.ProxyToken), nil
 }
 
 func (s *Service) metrics(w http.ResponseWriter, r *http.Request) {

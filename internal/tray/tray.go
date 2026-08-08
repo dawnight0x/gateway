@@ -29,12 +29,14 @@ type Options struct {
 }
 
 type Status struct {
-	Healthy       bool
-	ActiveKeys    int
-	FailedKeys    int
-	TodayRequests int
-	TodayTokens   int
-	Error         string
+	Healthy         bool
+	Readiness       string
+	ReadinessReason string
+	ActiveKeys      int
+	FailedKeys      int
+	TodayRequests   int
+	TodayTokens     int
+	Error           string
 }
 
 func Supported() bool {
@@ -175,6 +177,14 @@ func formatStatusLine(st Status) string {
 	}
 	if !st.Healthy {
 		return "状态异常: localhost"
+	}
+	switch st.Readiness {
+	case "unconfigured":
+		return "待配置: localhost"
+	case "unavailable":
+		return "不可用: localhost"
+	case "degraded":
+		return fmt.Sprintf("部分可用: localhost (%d 个 key 冷却)", st.FailedKeys)
 	}
 	if st.FailedKeys > 0 {
 		return fmt.Sprintf("运行中: localhost (%d 个 key 冷却)", st.FailedKeys)

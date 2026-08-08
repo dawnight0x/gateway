@@ -430,6 +430,19 @@ func TestAdminTestsNewAPIKeyViaModelsEndpoint(t *testing.T) {
 	if result.PromptTokens == nil || *result.PromptTokens != 3 || result.CompletionTokens == nil || *result.CompletionTokens != 1 || result.TotalTokens == nil || *result.TotalTokens != 4 {
 		t.Fatalf("usage = %#v", result)
 	}
+	res = authorizedAdminRequest(t, svc, http.MethodPost, "/admin/api/keys/test-all", "")
+	if res.Code != http.StatusOK {
+		t.Fatalf("bulk test status = %d, body = %s", res.Code, res.Body.String())
+	}
+	var bulk struct {
+		Results []keyTestResult `json:"results"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&bulk); err != nil {
+		t.Fatal(err)
+	}
+	if len(bulk.Results) != 1 || bulk.Results[0].KeyID != key.ID || bulk.Results[0].Status != "ok" {
+		t.Fatalf("bulk results = %#v", bulk.Results)
+	}
 }
 
 func TestAdminRefreshesProviderModelsWithoutTokenProbeAndRetainsInventoryOnEmptyResult(t *testing.T) {
@@ -1061,6 +1074,77 @@ func TestAdminRejectsOversizedJSONBody(t *testing.T) {
 	}
 }
 
+func TestAdminCreatesProviderAndFirstKeyAtomically(t *testing.T) {
+	st := testAdminStore(t)
+	svc := New(st, config.Default())
+
+	res := authorizedAdminRequest(t, svc, http.MethodPost, "/admin/api/providers", `{
+		"name":"Atomic Provider","type":"openai-compatible","baseUrl":"https://atomic.example/v1",
+		"firstKey":{"name":"Primary","secret":"sk-atomic","priority":7,"enabled":true}
+	}`)
+	if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), `"provider"`) || !strings.Contains(res.Body.String(), `"key"`) {
+		t.Fatalf("combined create status = %d, body = %s", res.Code, res.Body.String())
+	}
+	providers, err := st.ListProviders(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	keys, err := st.ListKeys(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(providers) != 1 || len(keys) != 1 || keys[0].ProviderID != providers[0].ID {
+		t.Fatalf("providers = %#v, keys = %#v", providers, keys)
+	}
+
+	res = authorizedAdminRequest(t, svc, http.MethodPost, "/admin/api/providers", `{
+		"id":"must-not-persist","name":"Rejected","type":"openai-compatible","baseUrl":"https://rejected.example/v1",
+		"firstKey":{"name":"Primary","secret":"sk-rejected","priority":1001,"enabled":true}
+	}`)
+	if res.Code != http.StatusBadRequest {
+		t.Fatalf("invalid combined create status = %d, body = %s", res.Code, res.Body.String())
+	}
+	providers, err = st.ListProviders(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, provider := range providers {
+		if provider.ID == "must-not-persist" {
+			t.Fatal("provider persisted after its first key failed validation")
+		}
+	}
+}
+
+func TestAdminReadinessStates(t *testing.T) {
+	provider := model.Provider{Enabled: true}
+	key := model.Key{Enabled: true}
+	gatewayKey := model.GatewayKey{Enabled: true}
+	tests := []struct {
+		name        string
+		providers   []model.Provider
+		keys        []model.Key
+		gatewayKeys []model.GatewayKey
+		stats       model.Stats
+		wantState   string
+		wantReason  string
+	}{
+		{name: "no providers", wantState: "unconfigured", wantReason: "no_providers"},
+		{name: "no upstream key", providers: []model.Provider{provider}, wantState: "unconfigured", wantReason: "no_upstream_keys"},
+		{name: "no active key", providers: []model.Provider{provider}, keys: []model.Key{key}, wantState: "unavailable", wantReason: "no_active_keys"},
+		{name: "no gateway key", providers: []model.Provider{provider}, keys: []model.Key{key}, stats: model.Stats{ActiveKeys: 1}, wantState: "unconfigured", wantReason: "no_gateway_key"},
+		{name: "degraded", providers: []model.Provider{provider}, keys: []model.Key{key}, gatewayKeys: []model.GatewayKey{gatewayKey}, stats: model.Stats{ActiveKeys: 1, FailedKeys: 1}, wantState: "degraded", wantReason: "upstream_failures"},
+		{name: "ready", providers: []model.Provider{provider}, keys: []model.Key{key}, gatewayKeys: []model.GatewayKey{gatewayKey}, stats: model.Stats{ActiveKeys: 1}, wantState: "ready", wantReason: "ready"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			state, reason := adminReadiness(tt.providers, tt.keys, tt.gatewayKeys, tt.stats, "")
+			if state != tt.wantState || reason != tt.wantReason {
+				t.Fatalf("readiness = %s/%s, want %s/%s", state, reason, tt.wantState, tt.wantReason)
+			}
+		})
+	}
+}
+
 func TestDashboardReturnsCompleteBootstrapPayload(t *testing.T) {
 	dir := t.TempDir()
 	st, err := store.Open(filepath.Join(dir, "gateway.db"), filepath.Join(dir, "secret.key"))
@@ -1104,13 +1188,23 @@ func TestDashboardReturnsCompleteBootstrapPayload(t *testing.T) {
 		}
 	}
 	var service struct {
-		Timezone string `json:"timezone"`
+		Timezone              string `json:"timezone"`
+		ProcessStatus         string `json:"processStatus"`
+		Readiness             string `json:"readiness"`
+		ReadinessReason       string `json:"readinessReason"`
+		GatewayAuthConfigured bool   `json:"gatewayAuthConfigured"`
 	}
 	if err := json.Unmarshal(payload["service"], &service); err != nil {
 		t.Fatal(err)
 	}
 	if service.Timezone != cfg.Storage.Timezone {
 		t.Fatalf("service timezone = %q, want %q", service.Timezone, cfg.Storage.Timezone)
+	}
+	if service.ProcessStatus != "running" || service.Readiness != "unconfigured" || service.ReadinessReason != "no_upstream_keys" {
+		t.Fatalf("service readiness = %#v", service)
+	}
+	if service.GatewayAuthConfigured {
+		t.Fatal("gateway auth unexpectedly configured")
 	}
 	var providerModels map[string][]string
 	if err := json.Unmarshal(payload["providerModels"], &providerModels); err != nil {

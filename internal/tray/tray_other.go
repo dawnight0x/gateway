@@ -16,12 +16,14 @@ type Options struct {
 }
 
 type Status struct {
-	Healthy       bool
-	ActiveKeys    int
-	FailedKeys    int
-	TodayRequests int
-	TodayTokens   int
-	Error         string
+	Healthy         bool
+	Readiness       string
+	ReadinessReason string
+	ActiveKeys      int
+	FailedKeys      int
+	TodayRequests   int
+	TodayTokens     int
+	Error           string
 }
 
 func Supported() bool {
