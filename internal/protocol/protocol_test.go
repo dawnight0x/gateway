@@ -20,6 +20,30 @@ func TestDetectGeminiPath(t *testing.T) {
 	}
 }
 
+func TestNativeUtilityEndpointsKeepTheirProtocolPaths(t *testing.T) {
+	tests := []struct {
+		path     string
+		protocol string
+		want     string
+	}{
+		{"/v1/responses/compact", router.ProtocolOpenAIResponses, "/v1/responses/compact"},
+		{"/v1/messages/count_tokens", router.ProtocolAnthropic, "/v1/messages/count_tokens"},
+		{"/v1beta/models/gemini-2.5-pro:countTokens", router.ProtocolGemini, "/v1beta/models/gemini-2.5-pro:countTokens"},
+		{"/v1beta/models/gemini-2.5-pro:embedContent", router.ProtocolGemini, "/v1beta/models/gemini-2.5-pro:embedContent"},
+	}
+	for _, test := range tests {
+		if got := DetectInbound(test.path); got != test.protocol {
+			t.Fatalf("DetectInbound(%q) = %q", test.path, got)
+		}
+		if !RequiresNativeProtocol(test.path) {
+			t.Fatalf("RequiresNativeProtocol(%q) = false", test.path)
+		}
+		if got := UpstreamPath(test.path, test.protocol, "gemini-2.5-pro", false); got != test.want {
+			t.Fatalf("UpstreamPath(%q) = %q, want %q", test.path, got, test.want)
+		}
+	}
+}
+
 func FuzzProtocolConversionDoesNotPanic(f *testing.F) {
 	f.Add([]byte(`{"model":"gpt","messages":[{"role":"user","content":"hello"}]}`), uint8(0), uint8(1))
 	f.Add([]byte(`{"contents":[{"parts":[{"text":"hello"}]}]}`), uint8(2), uint8(0))
@@ -59,7 +83,6 @@ func TestCrossProtocolConversionRejectsUnsupportedFeaturesInsteadOfDroppingThem(
 		inbound  string
 		upstream string
 	}{
-		{"OpenAI tools", `{"model":"gpt","messages":[{"role":"user","content":"hi"}],"tools":[{"type":"function","function":{"name":"weather"}}]}`, router.ProtocolOpenAI, router.ProtocolAnthropic},
 		{"OpenAI image", `{"model":"gpt","messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":"https://example.test/a.png"}}]}]}`, router.ProtocolOpenAI, router.ProtocolGemini},
 		{"Anthropic tool", `{"model":"claude","messages":[{"role":"user","content":"hi"}],"tools":[{"name":"weather"}]}`, router.ProtocolAnthropic, router.ProtocolOpenAI},
 		{"Gemini safety", `{"contents":[{"parts":[{"text":"hi"}]}],"safetySettings":[{"category":"x"}]}`, router.ProtocolGemini, router.ProtocolOpenAI},
@@ -76,6 +99,55 @@ func TestCrossProtocolConversionRejectsUnsupportedFeaturesInsteadOfDroppingThem(
 				t.Fatalf("conversion error = %v", err)
 			}
 		})
+	}
+}
+
+func TestCrossProtocolFunctionToolsAreConverted(t *testing.T) {
+	body := []byte(`{"model":"gpt","messages":[{"role":"user","content":"weather"}],"tools":[{"type":"function","function":{"name":"weather","parameters":{"type":"object"}}}],"tool_choice":"required"}`)
+	out, err := ConvertRequest(body, router.ProtocolOpenAI, router.ProtocolAnthropic, "claude", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(out.Body, &raw); err != nil {
+		t.Fatal(err)
+	}
+	if tools := raw["tools"].([]any); len(tools) != 1 || tools[0].(map[string]any)["name"] != "weather" {
+		t.Fatalf("tools = %#v", raw["tools"])
+	}
+	if choice := raw["tool_choice"].(map[string]any); choice["type"] != "any" {
+		t.Fatalf("tool choice = %#v", choice)
+	}
+}
+
+func TestGeminiFunctionToolsRoundTrip(t *testing.T) {
+	body := []byte(`{"model":"gpt","messages":[{"role":"assistant","content":null,"tool_calls":[{"id":"call_1","type":"function","function":{"name":"weather","arguments":"{\"city\":\"Paris\"}"}}]},{"role":"tool","tool_call_id":"call_1","content":"{\"temp\":21}"}],"tools":[{"type":"function","function":{"name":"weather","parameters":{"type":"object"}}}]}`)
+	converted, err := ConvertRequest(body, router.ProtocolOpenAI, router.ProtocolGemini, "gemini-2.5-pro", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(converted.Body, &raw); err != nil {
+		t.Fatal(err)
+	}
+	contents := raw["contents"].([]any)
+	modelMessage := contents[0].(map[string]any)
+	if len(modelMessage["parts"].([]any)) != 1 {
+		t.Fatalf("model parts = %#v", modelMessage["parts"])
+	}
+	if _, ok := modelMessage["parts"].([]any)[0].(map[string]any)["functionCall"]; !ok {
+		t.Fatalf("missing functionCall = %#v", modelMessage)
+	}
+	tools := raw["tools"].([]any)
+	if len(tools) != 1 {
+		t.Fatalf("tools = %#v", raw["tools"])
+	}
+}
+
+func TestExtractUsagePreservesProviderSpecificFields(t *testing.T) {
+	usage := ExtractUsage([]byte(`{"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":4,"totalTokenCount":14,"cachedContentTokenCount":3,"thoughtsTokenCount":2}}`))
+	if usage.CachedContentTokens == nil || *usage.CachedContentTokens != 3 || usage.ThoughtsTokens == nil || *usage.ThoughtsTokens != 2 {
+		t.Fatalf("usage = %#v", usage)
 	}
 }
 

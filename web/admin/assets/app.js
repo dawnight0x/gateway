@@ -758,6 +758,8 @@ createApp({
       return result.tokenStatus || '-';
     };
 
+    const capabilitiesText = (result) => Array.isArray(result?.capabilities) ? result.capabilities.join(', ') : '-';
+
     const modelMapDefault = (modelMap) => {
       const value = modelMap?.['*'] || modelMap?.default || '';
       return typeof value === 'string' ? value : '';
@@ -1684,6 +1686,7 @@ createApp({
       testConnectionText,
       testErrorText,
       tokenUsageText,
+      capabilitiesText,
       keyTestResults,
       testingKeyId,
       toggleProvider,

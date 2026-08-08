@@ -73,12 +73,12 @@ func TestRefreshBalancesUsesProviderBalancePath(t *testing.T) {
 
 func TestRefreshBalancesUsesDefaultNewAPIPath(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/user/self" {
+		if r.URL.Path != "/api/usage/token/" {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"data":{"quota":1973659.94,"used_quota":"250","request_count":10}}`))
+		_, _ = w.Write([]byte(`{"code":true,"data":{"total_available":1973659.94,"total_used":250,"request_count":10}}`))
 	}))
 	defer upstream.Close()
 
@@ -114,7 +114,7 @@ func TestRefreshBalancesUsesDefaultNewAPIPath(t *testing.T) {
 	if items[0].Balance == nil || *items[0].Balance != 1973659.94 {
 		t.Fatalf("remaining balance = %#v", items[0].Balance)
 	}
-	if items[0].Source != "new-api:/api/user/self" {
+	if items[0].Source != "new-api:/api/usage/token/" {
 		t.Fatalf("source = %s", items[0].Source)
 	}
 }
@@ -265,7 +265,7 @@ func TestRefreshBalancesMarksNewAPIUnlimitedQuota(t *testing.T) {
 
 func TestRefreshBalancesKeepsNewAPINumericBalanceWhenUnlimitedQuotaPresent(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/user/self" {
+		if r.URL.Path != "/api/usage/token/" {
 			t.Fatalf("path = %s", r.URL.Path)
 		}
 		w.Header().Set("Content-Type", "application/json")

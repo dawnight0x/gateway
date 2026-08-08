@@ -65,6 +65,7 @@ type streamToolState struct {
 	Arguments   strings.Builder
 	OutputIndex int
 	ChatIndex   int
+	BlockIndex  int
 	Added       bool
 	Done        bool
 }
@@ -296,10 +297,26 @@ func normalizeStreamEvent(event string, data []byte, upstream string) (normalize
 			}, nil
 		case "content_block_start":
 			block := asMap(raw["content_block"])
+			if stringField(block, "type") == "tool_use" {
+				arguments := ""
+				if meaningful(block["input"]) {
+					arguments = stringifyToolArguments(block["input"])
+				}
+				return normalizedStreamEvent{ToolCalls: []normalizedToolCall{{Index: intOr(raw["index"], 0), ID: stringField(block, "id"), CallID: stringField(block, "id"), Name: stringField(block, "name"), Arguments: arguments}}}, nil
+			}
 			return normalizedStreamEvent{Text: stringField(block, "text")}, nil
 		case "content_block_delta":
 			delta := asMap(raw["delta"])
-			return normalizedStreamEvent{Text: stringField(delta, "text")}, nil
+			switch stringField(delta, "type") {
+			case "input_json_delta":
+				return normalizedStreamEvent{ToolCalls: []normalizedToolCall{{Index: intOr(raw["index"], 0), Arguments: stringField(delta, "partial_json")}}}, nil
+			case "thinking_delta":
+				return normalizedStreamEvent{Reasoning: stringField(delta, "thinking")}, nil
+			default:
+				return normalizedStreamEvent{Text: stringField(delta, "text")}, nil
+			}
+		case "content_block_stop":
+			return normalizedStreamEvent{ToolCalls: []normalizedToolCall{{Index: intOr(raw["index"], 0), Done: true}}}, nil
 		case "message_delta":
 			delta := asMap(raw["delta"])
 			return normalizedStreamEvent{
@@ -308,7 +325,7 @@ func normalizeStreamEvent(event string, data []byte, upstream string) (normalize
 			}, nil
 		case "message_stop":
 			return normalizedStreamEvent{Done: true}, nil
-		case "ping", "content_block_stop":
+		case "ping":
 			return normalizedStreamEvent{}, nil
 		case "error":
 			return normalizedStreamEvent{}, newUpstreamStreamError("anthropic", streamErrorMessage(raw))
@@ -322,12 +339,23 @@ func normalizeStreamEvent(event string, data []byte, upstream string) (normalize
 		candidate := firstMap(raw["candidates"])
 		content := asMap(candidate["content"])
 		finish := stringField(candidate, "finishReason")
+		var text strings.Builder
+		var toolCalls []normalizedToolCall
+		for index, rawPart := range slice(content["parts"]) {
+			part := asMap(rawPart)
+			text.WriteString(stringField(part, "text"))
+			if call := asMap(part["functionCall"]); len(call) > 0 {
+				id := stringField(call, "id")
+				toolCalls = append(toolCalls, normalizedToolCall{Index: index, ID: id, CallID: id, Name: stringField(call, "name"), Arguments: stringifyToolArguments(call["args"]), Done: finish != ""})
+			}
+		}
 		return normalizedStreamEvent{
-			Model:  stringField(raw, "modelVersion"),
-			Text:   partsText(content["parts"]),
-			Finish: finish,
-			Usage:  ExtractUsage(data),
-			Done:   finish != "",
+			Model:     stringField(raw, "modelVersion"),
+			Text:      text.String(),
+			ToolCalls: toolCalls,
+			Finish:    finish,
+			Usage:     ExtractUsage(data),
+			Done:      finish != "",
 		}, nil
 	default:
 		return normalizedStreamEvent{}, fmt.Errorf("unsupported upstream stream protocol %q", upstream)
@@ -505,7 +533,7 @@ func renderOpenAIStream(event normalizedStreamEvent, state *StreamState) ([]Stre
 
 func renderAnthropicStream(event normalizedStreamEvent, state *StreamState) ([]StreamFrame, error) {
 	var frames []StreamFrame
-	if !state.Started && (event.Text != "" || event.Finish != "" || event.Done || hasUsage(event.Usage) || state.ID != "" || state.Model != "") {
+	if !state.Started && (event.Text != "" || len(event.ToolCalls) > 0 || event.Finish != "" || event.Done || hasUsage(event.Usage) || state.ID != "" || state.Model != "") {
 		state.Started = true
 		frames = append(frames,
 			mustJSONFrame("message_start", map[string]any{
@@ -516,18 +544,61 @@ func renderAnthropicStream(event normalizedStreamEvent, state *StreamState) ([]S
 					"usage": map[string]any{"input_tokens": usageValue(state.Usage.PromptTokens), "output_tokens": 0},
 				},
 			}),
-			mustJSONFrame("content_block_start", map[string]any{
-				"type": "content_block_start", "index": 0,
-				"content_block": map[string]any{"type": "text", "text": ""},
-			}),
 		)
-		state.ContentOpen = true
 	}
 	if event.Text != "" {
+		if !state.ContentOpen {
+			frames = append(frames, mustJSONFrame("content_block_start", map[string]any{
+				"type": "content_block_start", "index": 0,
+				"content_block": map[string]any{"type": "text", "text": ""},
+			}))
+			state.ContentOpen = true
+		}
 		frames = append(frames, mustJSONFrame("content_block_delta", map[string]any{
 			"type": "content_block_delta", "index": 0,
 			"delta": map[string]any{"type": "text_delta", "text": event.Text},
 		}))
+	}
+	for _, call := range event.ToolCalls {
+		tool := ensureStreamTool(state, call.Index)
+		if call.ID != "" {
+			tool.ID = call.ID
+		}
+		if call.CallID != "" {
+			tool.CallID = call.CallID
+		}
+		if call.Name != "" {
+			tool.Name = call.Name
+		}
+		if !tool.Added {
+			tool.Added = true
+			tool.BlockIndex = tool.ChatIndex
+			if state.ContentOpen {
+				tool.BlockIndex++
+			}
+			id := tool.CallID
+			if id == "" {
+				id = tool.ID
+			}
+			frames = append(frames, mustJSONFrame("content_block_start", map[string]any{
+				"type": "content_block_start", "index": tool.BlockIndex,
+				"content_block": map[string]any{"type": "tool_use", "id": id, "name": tool.Name, "input": map[string]any{}},
+			}))
+		}
+		arguments, err := appendToolArguments(state, tool, call.Arguments, call.Done)
+		if err != nil {
+			return nil, err
+		}
+		if arguments != "" {
+			frames = append(frames, mustJSONFrame("content_block_delta", map[string]any{
+				"type": "content_block_delta", "index": tool.BlockIndex,
+				"delta": map[string]any{"type": "input_json_delta", "partial_json": arguments},
+			}))
+		}
+		if call.Done && !tool.Done {
+			tool.Done = true
+			frames = append(frames, mustJSONFrame("content_block_stop", map[string]any{"type": "content_block_stop", "index": tool.BlockIndex}))
+		}
 	}
 	if event.Finish != "" || hasUsage(event.Usage) {
 		frames = append(frames, mustJSONFrame("message_delta", map[string]any{
@@ -552,6 +623,12 @@ func renderAnthropicStream(event normalizedStreamEvent, state *StreamState) ([]S
 		if state.ContentOpen {
 			frames = append(frames, mustJSONFrame("content_block_stop", map[string]any{"type": "content_block_stop", "index": 0}))
 		}
+		for _, tool := range state.Tools {
+			if tool.Added && !tool.Done {
+				tool.Done = true
+				frames = append(frames, mustJSONFrame("content_block_stop", map[string]any{"type": "content_block_stop", "index": tool.BlockIndex}))
+			}
+		}
 		frames = append(frames, mustJSONFrame("message_stop", map[string]any{"type": "message_stop"}))
 		state.Finished = true
 	}
@@ -559,12 +636,29 @@ func renderAnthropicStream(event normalizedStreamEvent, state *StreamState) ([]S
 }
 
 func renderGeminiStream(event normalizedStreamEvent, state *StreamState) ([]StreamFrame, error) {
-	if event.Text == "" && event.Finish == "" && !hasUsage(event.Usage) {
+	if event.Text == "" && len(event.ToolCalls) == 0 && event.Finish == "" && !hasUsage(event.Usage) {
 		return nil, nil
 	}
 	candidate := map[string]any{"index": 0}
+	parts := []map[string]any{}
 	if event.Text != "" {
-		candidate["content"] = map[string]any{"role": "model", "parts": []map[string]any{{"text": event.Text}}}
+		parts = append(parts, map[string]any{"text": event.Text})
+	}
+	for _, call := range event.ToolCalls {
+		args := parseToolArguments(call.Arguments)
+		if _, ok := args.(map[string]any); !ok {
+			continue
+		}
+		functionCall := map[string]any{"name": call.Name, "args": args}
+		if call.CallID != "" {
+			functionCall["id"] = call.CallID
+		} else if call.ID != "" {
+			functionCall["id"] = call.ID
+		}
+		parts = append(parts, map[string]any{"functionCall": functionCall})
+	}
+	if len(parts) > 0 {
+		candidate["content"] = map[string]any{"role": "model", "parts": parts}
 	}
 	if event.Finish != "" {
 		candidate["finishReason"] = geminiFinishReason(event.Finish)
@@ -753,6 +847,24 @@ func mergeUsage(dst *Usage, src Usage) {
 	if src.TotalTokens != nil {
 		dst.TotalTokens = src.TotalTokens
 	}
+	if src.CacheCreationInputTokens != nil {
+		dst.CacheCreationInputTokens = src.CacheCreationInputTokens
+	}
+	if src.CacheReadInputTokens != nil {
+		dst.CacheReadInputTokens = src.CacheReadInputTokens
+	}
+	if src.ReasoningTokens != nil {
+		dst.ReasoningTokens = src.ReasoningTokens
+	}
+	if src.ToolUseTokens != nil {
+		dst.ToolUseTokens = src.ToolUseTokens
+	}
+	if src.CachedContentTokens != nil {
+		dst.CachedContentTokens = src.CachedContentTokens
+	}
+	if src.ThoughtsTokens != nil {
+		dst.ThoughtsTokens = src.ThoughtsTokens
+	}
 	if dst.TotalTokens == nil && dst.PromptTokens != nil && dst.CompletionTokens != nil {
 		total := *dst.PromptTokens + *dst.CompletionTokens
 		dst.TotalTokens = &total
@@ -809,14 +921,18 @@ func responsesUsageFromMap(raw map[string]any) Usage {
 
 func usageFromMap(raw map[string]any, promptKey, completionKey, totalKey string) Usage {
 	return Usage{
-		PromptTokens:     intFromAny(raw[promptKey]),
-		CompletionTokens: intFromAny(raw[completionKey]),
-		TotalTokens:      intFromAny(raw[totalKey]),
+		PromptTokens:             intFromAny(raw[promptKey]),
+		CompletionTokens:         intFromAny(raw[completionKey]),
+		TotalTokens:              intFromAny(raw[totalKey]),
+		CacheCreationInputTokens: intFromAny(raw["cache_creation_input_tokens"]),
+		CacheReadInputTokens:     intFromAny(raw["cache_read_input_tokens"]),
 	}
 }
 
 func hasUsage(usage Usage) bool {
-	return usage.PromptTokens != nil || usage.CompletionTokens != nil || usage.TotalTokens != nil
+	return usage.PromptTokens != nil || usage.CompletionTokens != nil || usage.TotalTokens != nil ||
+		usage.CacheCreationInputTokens != nil || usage.CacheReadInputTokens != nil || usage.ReasoningTokens != nil ||
+		usage.ToolUseTokens != nil || usage.CachedContentTokens != nil || usage.ThoughtsTokens != nil
 }
 
 func usageValue(value *int) int {
@@ -827,21 +943,69 @@ func usageValue(value *int) int {
 }
 
 func openAIUsage(usage Usage) map[string]any {
-	return map[string]any{
+	out := map[string]any{
 		"prompt_tokens": usageValue(usage.PromptTokens), "completion_tokens": usageValue(usage.CompletionTokens), "total_tokens": usageValue(usage.TotalTokens),
 	}
+	if usage.CachedContentTokens != nil || usage.CacheReadInputTokens != nil {
+		cached := usage.CachedContentTokens
+		if cached == nil {
+			cached = usage.CacheReadInputTokens
+		}
+		out["prompt_tokens_details"] = map[string]any{"cached_tokens": usageValue(cached)}
+	}
+	if usage.ReasoningTokens != nil || usage.ThoughtsTokens != nil {
+		reasoning := usage.ReasoningTokens
+		if reasoning == nil {
+			reasoning = usage.ThoughtsTokens
+		}
+		out["completion_tokens_details"] = map[string]any{"reasoning_tokens": usageValue(reasoning)}
+	}
+	return out
 }
 
 func geminiUsage(usage Usage) map[string]any {
-	return map[string]any{
+	out := map[string]any{
 		"promptTokenCount": usageValue(usage.PromptTokens), "candidatesTokenCount": usageValue(usage.CompletionTokens), "totalTokenCount": usageValue(usage.TotalTokens),
 	}
+	if usage.ToolUseTokens != nil {
+		out["toolUsePromptTokenCount"] = usageValue(usage.ToolUseTokens)
+	}
+	if usage.CachedContentTokens != nil || usage.CacheReadInputTokens != nil {
+		cached := usage.CachedContentTokens
+		if cached == nil {
+			cached = usage.CacheReadInputTokens
+		}
+		out["cachedContentTokenCount"] = usageValue(cached)
+	}
+	if usage.ThoughtsTokens != nil || usage.ReasoningTokens != nil {
+		thoughts := usage.ThoughtsTokens
+		if thoughts == nil {
+			thoughts = usage.ReasoningTokens
+		}
+		out["thoughtsTokenCount"] = usageValue(thoughts)
+	}
+	return out
 }
 
 func responsesUsage(usage Usage) map[string]any {
-	return map[string]any{
+	out := map[string]any{
 		"input_tokens": usageValue(usage.PromptTokens), "output_tokens": usageValue(usage.CompletionTokens), "total_tokens": usageValue(usage.TotalTokens),
 	}
+	if usage.CachedContentTokens != nil || usage.CacheReadInputTokens != nil {
+		cached := usage.CachedContentTokens
+		if cached == nil {
+			cached = usage.CacheReadInputTokens
+		}
+		out["input_tokens_details"] = map[string]any{"cached_tokens": usageValue(cached)}
+	}
+	if usage.ReasoningTokens != nil || usage.ThoughtsTokens != nil {
+		reasoning := usage.ReasoningTokens
+		if reasoning == nil {
+			reasoning = usage.ThoughtsTokens
+		}
+		out["output_tokens_details"] = map[string]any{"reasoning_tokens": usageValue(reasoning)}
+	}
+	return out
 }
 
 func openAIFinishReason(reason string) string {

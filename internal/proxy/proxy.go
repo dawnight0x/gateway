@@ -99,9 +99,13 @@ func (s *Service) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/v1/completions", s.proxy)
 	mux.HandleFunc("/completions", s.proxy)
 	mux.HandleFunc("/v1/responses", s.proxy)
+	mux.HandleFunc("/v1/responses/", s.proxy)
 	mux.HandleFunc("/responses", s.proxy)
+	mux.HandleFunc("/responses/", s.proxy)
 	mux.HandleFunc("/v1/messages", s.proxy)
+	mux.HandleFunc("/v1/messages/", s.proxy)
 	mux.HandleFunc("/messages", s.proxy)
+	mux.HandleFunc("/messages/", s.proxy)
 	mux.HandleFunc("/v1beta/models", s.models)
 	mux.HandleFunc("/v1beta/models/", s.proxy)
 	mux.HandleFunc("/v1/models/", s.proxy)
@@ -169,6 +173,15 @@ func (s *Service) proxy(w http.ResponseWriter, r *http.Request) {
 		s.log(r.Context(), requestID, inbound, "", "", modelName, http.StatusInternalServerError, start, protocol.Usage{}, "storage_error")
 		writeProxyStoreError(w, "load routing candidates", err)
 		return
+	}
+	if protocol.RequiresNativeProtocol(r.URL.Path) {
+		filtered := candidates[:0]
+		for _, candidate := range candidates {
+			if router.ChooseUpstreamProtocol(inbound, candidate) == inbound {
+				filtered = append(filtered, candidate)
+			}
+		}
+		candidates = filtered
 	}
 	if len(candidates) == 0 {
 		s.log(r.Context(), requestID, inbound, "", "", modelName, http.StatusServiceUnavailable, start, protocol.Usage{}, "no_available_key")

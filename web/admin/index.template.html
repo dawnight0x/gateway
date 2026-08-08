@@ -515,6 +515,7 @@
                       <span>{{ t('test.latency') }} {{ keyTestResults[k.id].latencyMs || 0 }}ms</span>
                       <span>{{ t('test.models') }} {{ keyTestResults[k.id].modelCount ?? '-' }}</span>
                       <span>{{ t('test.tokens') }} {{ tokenUsageText(keyTestResults[k.id]) }}</span>
+                      <span v-if="keyTestResults[k.id].capabilities?.length">{{ t('test.capabilities') }} {{ capabilitiesText(keyTestResults[k.id]) }}</span>
                     </div>
                     <small v-if="testErrorText(keyTestResults[k.id])" class="test-error">{{ testErrorText(keyTestResults[k.id]) }}</small>
                   </div>

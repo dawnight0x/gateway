@@ -20,25 +20,33 @@ import (
 )
 
 type keyTestResult struct {
-	ProviderID       string   `json:"providerId,omitempty"`
-	KeyID            string   `json:"keyId"`
-	Endpoint         string   `json:"endpoint,omitempty"`
-	TokenEndpoint    string   `json:"tokenEndpoint,omitempty"`
-	Status           string   `json:"status"`
-	ConnectionStatus string   `json:"connectionStatus,omitempty"`
-	TokenStatus      string   `json:"tokenStatus,omitempty"`
-	StatusCode       int      `json:"statusCode,omitempty"`
-	TokenStatusCode  int      `json:"tokenStatusCode,omitempty"`
-	LatencyMS        int64    `json:"latencyMs,omitempty"`
-	TokenLatencyMS   int64    `json:"tokenLatencyMs,omitempty"`
-	Model            string   `json:"model,omitempty"`
-	Models           []string `json:"models,omitempty"`
-	ModelCount       *int     `json:"modelCount,omitempty"`
-	PromptTokens     *int     `json:"promptTokens,omitempty"`
-	CompletionTokens *int     `json:"completionTokens,omitempty"`
-	TotalTokens      *int     `json:"totalTokens,omitempty"`
-	Error            string   `json:"error,omitempty"`
-	CheckedAt        string   `json:"checkedAt"`
+	ProviderID               string   `json:"providerId,omitempty"`
+	KeyID                    string   `json:"keyId"`
+	Endpoint                 string   `json:"endpoint,omitempty"`
+	TokenEndpoint            string   `json:"tokenEndpoint,omitempty"`
+	TokenProtocol            string   `json:"tokenProtocol,omitempty"`
+	Capabilities             []string `json:"capabilities,omitempty"`
+	Status                   string   `json:"status"`
+	ConnectionStatus         string   `json:"connectionStatus,omitempty"`
+	TokenStatus              string   `json:"tokenStatus,omitempty"`
+	StatusCode               int      `json:"statusCode,omitempty"`
+	TokenStatusCode          int      `json:"tokenStatusCode,omitempty"`
+	LatencyMS                int64    `json:"latencyMs,omitempty"`
+	TokenLatencyMS           int64    `json:"tokenLatencyMs,omitempty"`
+	Model                    string   `json:"model,omitempty"`
+	Models                   []string `json:"models,omitempty"`
+	ModelCount               *int     `json:"modelCount,omitempty"`
+	PromptTokens             *int     `json:"promptTokens,omitempty"`
+	CompletionTokens         *int     `json:"completionTokens,omitempty"`
+	TotalTokens              *int     `json:"totalTokens,omitempty"`
+	CacheCreationInputTokens *int     `json:"cacheCreationInputTokens,omitempty"`
+	CacheReadInputTokens     *int     `json:"cacheReadInputTokens,omitempty"`
+	ReasoningTokens          *int     `json:"reasoningTokens,omitempty"`
+	ToolUseTokens            *int     `json:"toolUseTokens,omitempty"`
+	CachedContentTokens      *int     `json:"cachedContentTokens,omitempty"`
+	ThoughtsTokens           *int     `json:"thoughtsTokens,omitempty"`
+	Error                    string   `json:"error,omitempty"`
+	CheckedAt                string   `json:"checkedAt"`
 }
 
 const (
@@ -137,6 +145,7 @@ func minInt(a, b int) int {
 func (s *Service) tryTestKeyPath(ctx context.Context, key model.Key, path string) keyTestResult {
 	result := s.discoverModelsAtPath(ctx, key, path)
 	if result.Status == "ok" {
+		result.Capabilities = providerCapabilities(key.ProviderType)
 		s.tryTokenProbe(ctx, key, &result)
 	}
 	return result
@@ -313,6 +322,7 @@ func (s *Service) tryTokenProbe(ctx context.Context, key model.Key, result *keyT
 		return
 	}
 	result.TokenEndpoint = endpoint
+	result.TokenProtocol = tokenProbeProtocol(key.ProviderType)
 	timeoutSeconds := s.cfg.Routing.TimeoutSeconds
 	if timeoutSeconds <= 0 || timeoutSeconds > 30 {
 		timeoutSeconds = 30
@@ -369,7 +379,39 @@ func (s *Service) tryTokenProbe(ctx context.Context, key model.Key, result *keyT
 	result.PromptTokens = usage.PromptTokens
 	result.CompletionTokens = usage.CompletionTokens
 	result.TotalTokens = usage.TotalTokens
+	result.CacheCreationInputTokens = usage.CacheCreationInputTokens
+	result.CacheReadInputTokens = usage.CacheReadInputTokens
+	result.ReasoningTokens = usage.ReasoningTokens
+	result.ToolUseTokens = usage.ToolUseTokens
+	result.CachedContentTokens = usage.CachedContentTokens
+	result.ThoughtsTokens = usage.ThoughtsTokens
 	result.TokenStatus = "ok"
+}
+
+func providerCapabilities(providerType string) []string {
+	switch providerType {
+	case model.ProviderNewAPI, model.ProviderSub2API:
+		return []string{"openai-chat", "openai-responses", "anthropic-messages", "gemini-generate-content"}
+	case model.ProviderAnthropicCompatible:
+		return []string{"anthropic-messages"}
+	case model.ProviderGeminiCompatible:
+		return []string{"gemini-generate-content"}
+	case model.ProviderOpenAICompatible:
+		return []string{"openai-chat", "openai-responses"}
+	default:
+		return []string{"openai-chat"}
+	}
+}
+
+func tokenProbeProtocol(providerType string) string {
+	switch providerType {
+	case model.ProviderAnthropicCompatible:
+		return "anthropic-messages"
+	case model.ProviderGeminiCompatible:
+		return "gemini-generate-content"
+	default:
+		return "openai-chat"
+	}
 }
 
 func keyTestHTTPClient(timeoutSeconds int) *http.Client {

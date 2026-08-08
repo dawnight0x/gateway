@@ -68,6 +68,17 @@ func TestCandidatesKeepStableKeyPriorityWithoutRoundRobin(t *testing.T) {
 	}
 }
 
+func TestGatewayProvidersPreferNativeInboundProtocol(t *testing.T) {
+	for _, providerType := range []string{model.ProviderNewAPI, model.ProviderSub2API} {
+		key := model.Key{ProviderType: providerType}
+		for _, inbound := range []string{ProtocolOpenAIResponses, ProtocolAnthropic, ProtocolGemini} {
+			if got := ChooseUpstreamProtocol(inbound, key); got != inbound {
+				t.Fatalf("provider %s inbound %s chose %s", providerType, inbound, got)
+			}
+		}
+	}
+}
+
 func TestKeyCoolsAfterFailureThreshold(t *testing.T) {
 	ctx := context.Background()
 	st := testStore(t)

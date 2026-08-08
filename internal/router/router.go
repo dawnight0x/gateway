@@ -510,20 +510,14 @@ func ChooseUpstreamProtocol(inboundProtocol string, key model.Key) string {
 		return ProtocolGemini
 	case model.ProviderAnthropicCompatible:
 		return ProtocolAnthropic
-	case model.ProviderOpenAICompatible, model.ProviderNewAPI:
+	case model.ProviderOpenAICompatible:
 		if inboundProtocol == ProtocolOpenAIResponses {
 			return ProtocolOpenAIResponses
 		}
 		return ProtocolOpenAI
-	case model.ProviderSub2API:
-		if inboundProtocol == ProtocolAnthropic {
-			return ProtocolAnthropic
-		}
-		if inboundProtocol == ProtocolGemini {
-			return ProtocolGemini
-		}
-		if inboundProtocol == ProtocolOpenAIResponses {
-			return ProtocolOpenAIResponses
+	case model.ProviderNewAPI, model.ProviderSub2API:
+		if inboundProtocol == ProtocolAnthropic || inboundProtocol == ProtocolGemini || inboundProtocol == ProtocolOpenAIResponses {
+			return inboundProtocol
 		}
 		return ProtocolOpenAI
 	default:
@@ -541,9 +535,9 @@ func supportsProtocol(providerType, upstreamProtocol string) bool {
 	case ProtocolOpenAIResponses:
 		return providerType == model.ProviderOpenAICompatible || providerType == model.ProviderNewAPI || providerType == model.ProviderSub2API || providerType == model.ProviderCustom
 	case ProtocolAnthropic:
-		return providerType == model.ProviderAnthropicCompatible || providerType == model.ProviderSub2API || providerType == model.ProviderCustom
+		return providerType == model.ProviderAnthropicCompatible || providerType == model.ProviderNewAPI || providerType == model.ProviderSub2API || providerType == model.ProviderCustom
 	case ProtocolGemini:
-		return providerType == model.ProviderGeminiCompatible || providerType == model.ProviderSub2API || providerType == model.ProviderCustom
+		return providerType == model.ProviderGeminiCompatible || providerType == model.ProviderNewAPI || providerType == model.ProviderSub2API || providerType == model.ProviderCustom
 	default:
 		return false
 	}

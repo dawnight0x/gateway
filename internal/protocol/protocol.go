@@ -19,19 +19,25 @@ type ConvertedRequest struct {
 }
 
 type Usage struct {
-	PromptTokens     *int
-	CompletionTokens *int
-	TotalTokens      *int
+	PromptTokens             *int
+	CompletionTokens         *int
+	TotalTokens              *int
+	CacheCreationInputTokens *int
+	CacheReadInputTokens     *int
+	ReasoningTokens          *int
+	ToolUseTokens            *int
+	CachedContentTokens      *int
+	ThoughtsTokens           *int
 }
 
 var geminiPathRE = regexp.MustCompile(`/v1(?:beta)?/models/([^:/]+)(?::[^/]+)?`)
 
 func DetectInbound(path string) string {
 	if (strings.Contains(path, "/v1beta/models/") || strings.Contains(path, "/v1/models/")) &&
-		(strings.Contains(path, ":generateContent") || strings.Contains(path, ":streamGenerateContent")) {
+		(strings.Contains(path, ":generateContent") || strings.Contains(path, ":streamGenerateContent") || strings.Contains(path, ":countTokens") || strings.Contains(path, ":embedContent")) {
 		return router.ProtocolGemini
 	}
-	if strings.HasSuffix(path, "/messages") {
+	if strings.HasSuffix(path, "/messages") || strings.HasSuffix(path, "/messages/count_tokens") {
 		return router.ProtocolAnthropic
 	}
 	if strings.Contains(path, "/responses") {
@@ -52,15 +58,33 @@ func ExtractPathModel(path string) string {
 	return v
 }
 
+func RequiresNativeProtocol(path string) bool {
+	return strings.Contains(path, "/responses/compact") ||
+		strings.Contains(path, "/messages/count_tokens") ||
+		strings.Contains(path, ":countTokens") ||
+		strings.Contains(path, ":embedContent")
+}
+
 func UpstreamPath(inboundPath, upstreamProtocol, modelName string, stream bool) string {
 	switch upstreamProtocol {
 	case router.ProtocolOpenAIResponses:
+		if strings.Contains(inboundPath, "/responses/compact") {
+			return "/v1/responses/compact"
+		}
 		return "/v1/responses"
 	case router.ProtocolAnthropic:
+		if strings.Contains(inboundPath, "/messages/count_tokens") {
+			return "/v1/messages/count_tokens"
+		}
 		return "/v1/messages"
 	case router.ProtocolGemini:
 		action := ":generateContent"
-		if stream || strings.Contains(inboundPath, ":streamGenerateContent") {
+		switch {
+		case strings.Contains(inboundPath, ":countTokens"):
+			action = ":countTokens"
+		case strings.Contains(inboundPath, ":embedContent"):
+			action = ":embedContent"
+		case stream || strings.Contains(inboundPath, ":streamGenerateContent"):
 			action = ":streamGenerateContent"
 		}
 		modelName = model.NormalizeModelID(model.ProviderGeminiCompatible, modelName)
@@ -92,6 +116,23 @@ func ConvertRequest(body []byte, inbound, upstream, upstreamModel, pathModel str
 		converted := responsesToChatCompletions(raw, upstreamModel)
 		out, err := json.Marshal(converted)
 		return ConvertedRequest{Body: out, Model: modelName, Stream: boolField(converted, "stream")}, err
+	}
+	if inbound == router.ProtocolOpenAIResponses && upstream != router.ProtocolOpenAIResponses {
+		chat := responsesToChatCompletions(raw, upstreamModel)
+		if err := validateCrossProtocolRequest(chat, router.ProtocolOpenAI, upstream); err != nil {
+			return ConvertedRequest{}, err
+		}
+		var converted any
+		switch upstream {
+		case router.ProtocolAnthropic:
+			converted = openAIToAnthropic(chat, upstreamModel)
+		case router.ProtocolGemini:
+			converted = openAIToGemini(chat)
+		default:
+			converted = chat
+		}
+		out, err := json.Marshal(converted)
+		return ConvertedRequest{Body: out, Model: modelName, Stream: boolField(chat, "stream")}, err
 	}
 	if inbound == router.ProtocolOpenAI && upstream == router.ProtocolOpenAIResponses {
 		converted := chatCompletionsToResponses(raw, upstreamModel)
@@ -193,13 +234,30 @@ func ExtractUsage(body []byte) Usage {
 			n := *p + *c
 			t = &n
 		}
-		return Usage{PromptTokens: p, CompletionTokens: c, TotalTokens: t}
+		promptDetails := asMap(u["prompt_tokens_details"])
+		if len(promptDetails) == 0 {
+			promptDetails = asMap(u["input_tokens_details"])
+		}
+		completionDetails := asMap(u["completion_tokens_details"])
+		if len(completionDetails) == 0 {
+			completionDetails = asMap(u["output_tokens_details"])
+		}
+		return Usage{
+			PromptTokens: p, CompletionTokens: c, TotalTokens: t,
+			CacheCreationInputTokens: intFromAny(u["cache_creation_input_tokens"]),
+			CacheReadInputTokens:     intFromAny(u["cache_read_input_tokens"]),
+			ReasoningTokens:          intFromAny(completionDetails["reasoning_tokens"]),
+			CachedContentTokens:      intFromAny(promptDetails["cached_tokens"]),
+		}
 	}
 	if u, ok := raw["usageMetadata"].(map[string]any); ok {
 		return Usage{
-			PromptTokens:     intFromAny(u["promptTokenCount"]),
-			CompletionTokens: intFromAny(u["candidatesTokenCount"]),
-			TotalTokens:      intFromAny(u["totalTokenCount"]),
+			PromptTokens:        intFromAny(u["promptTokenCount"]),
+			CompletionTokens:    intFromAny(u["candidatesTokenCount"]),
+			TotalTokens:         intFromAny(u["totalTokenCount"]),
+			ToolUseTokens:       intFromAny(u["toolUsePromptTokenCount"]),
+			CachedContentTokens: intFromAny(u["cachedContentTokenCount"]),
+			ThoughtsTokens:      intFromAny(u["thoughtsTokenCount"]),
 		}
 	}
 	return Usage{}
@@ -215,11 +273,28 @@ func openAIToAnthropic(in map[string]any, modelName string) map[string]any {
 			system = append(system, contentText(msg["content"]))
 			continue
 		}
-		outRole := "user"
-		if role == "assistant" {
-			outRole = "assistant"
+		outRole := role
+		if outRole != "assistant" {
+			outRole = "user"
 		}
-		messages = append(messages, map[string]any{"role": outRole, "content": []map[string]any{{"type": "text", "text": contentText(msg["content"])}}})
+		content := openAIContentToAnthropic(msg["content"])
+		if role == "tool" || role == "function" {
+			content = []map[string]any{{"type": "tool_result", "tool_use_id": stringOr(msg["tool_call_id"], stringField(msg, "name")), "content": contentText(msg["content"])}}
+			outRole = "user"
+		}
+		if role == "assistant" {
+			for _, rawCall := range slice(msg["tool_calls"]) {
+				call := asMap(rawCall)
+				function := asMap(call["function"])
+				content = append(content, map[string]any{
+					"type": "tool_use", "id": stringField(call, "id"), "name": stringField(function, "name"), "input": parseToolArguments(function["arguments"]),
+				})
+			}
+		}
+		if len(content) == 0 {
+			content = []map[string]any{{"type": "text", "text": ""}}
+		}
+		messages = append(messages, map[string]any{"role": outRole, "content": content})
 	}
 	out := map[string]any{"model": modelName, "messages": messages, "max_tokens": intOr(in["max_tokens"], intOr(in["max_completion_tokens"], 4096)), "stream": boolField(in, "stream")}
 	if len(system) > 0 {
@@ -233,6 +308,12 @@ func openAIToAnthropic(in map[string]any, modelName string) map[string]any {
 	}
 	if v, ok := in["stop"]; ok {
 		out["stop_sequences"] = v
+	}
+	if tools := openAIToolsToAnthropic(in["tools"]); len(tools) > 0 {
+		out["tools"] = tools
+	}
+	if choice := openAIToolChoiceToAnthropic(in["tool_choice"]); choice != nil {
+		out["tool_choice"] = choice
 	}
 	return out
 }
@@ -248,7 +329,28 @@ func anthropicToOpenAI(in map[string]any, modelName string) map[string]any {
 		if stringField(msg, "role") == "assistant" {
 			role = "assistant"
 		}
-		messages = append(messages, map[string]any{"role": role, "content": contentText(msg["content"])})
+		content, toolCalls, toolResults := anthropicContentToOpenAI(msg["content"])
+		if role == "assistant" {
+			assistant := map[string]any{"role": role, "content": content}
+			if len(toolCalls) > 0 {
+				assistant["tool_calls"] = toolCalls
+				if content == "" {
+					assistant["content"] = nil
+				}
+			}
+			messages = append(messages, assistant)
+			continue
+		}
+		if len(toolResults) > 0 {
+			for _, result := range toolResults {
+				messages = append(messages, result)
+			}
+			if content != "" {
+				messages = append(messages, map[string]any{"role": "user", "content": content})
+			}
+			continue
+		}
+		messages = append(messages, map[string]any{"role": role, "content": content})
 	}
 	out := map[string]any{"model": modelName, "messages": messages, "stream": boolField(in, "stream")}
 	if v, ok := in["max_tokens"]; ok {
@@ -263,7 +365,140 @@ func anthropicToOpenAI(in map[string]any, modelName string) map[string]any {
 	if v, ok := in["stop_sequences"]; ok {
 		out["stop"] = v
 	}
+	if tools := anthropicToolsToOpenAI(in["tools"]); len(tools) > 0 {
+		out["tools"] = tools
+	}
+	if choice := anthropicToolChoiceToOpenAI(in["tool_choice"]); choice != nil {
+		out["tool_choice"] = choice
+	}
 	return out
+}
+
+func openAIContentToAnthropic(value any) []map[string]any {
+	if text, ok := value.(string); ok {
+		return []map[string]any{{"type": "text", "text": text}}
+	}
+	var out []map[string]any
+	for _, raw := range slice(value) {
+		part := asMap(raw)
+		switch stringField(part, "type") {
+		case "text", "input_text", "output_text":
+			out = append(out, map[string]any{"type": "text", "text": stringOr(part["text"], "")})
+		}
+	}
+	return out
+}
+
+func anthropicContentToOpenAI(value any) (string, []map[string]any, []map[string]any) {
+	if text, ok := value.(string); ok {
+		return text, nil, nil
+	}
+	var text strings.Builder
+	var toolCalls []map[string]any
+	var toolResults []map[string]any
+	for _, raw := range slice(value) {
+		part := asMap(raw)
+		switch stringField(part, "type") {
+		case "text":
+			text.WriteString(stringField(part, "text"))
+		case "tool_use":
+			id := stringField(part, "id")
+			toolCalls = append(toolCalls, map[string]any{"id": id, "type": "function", "function": map[string]any{"name": stringField(part, "name"), "arguments": stringifyToolArguments(part["input"])}})
+		case "tool_result":
+			toolResults = append(toolResults, map[string]any{"role": "tool", "tool_call_id": stringField(part, "tool_use_id"), "content": contentText(part["content"])})
+		}
+	}
+	return text.String(), toolCalls, toolResults
+}
+
+func parseToolArguments(value any) any {
+	if value == nil {
+		return map[string]any{}
+	}
+	if text, ok := value.(string); ok {
+		var parsed any
+		if json.Unmarshal([]byte(text), &parsed) == nil {
+			return parsed
+		}
+		return map[string]any{"value": text}
+	}
+	return value
+}
+
+func stringifyToolArguments(value any) string {
+	if text, ok := value.(string); ok {
+		return text
+	}
+	b, err := json.Marshal(value)
+	if err != nil {
+		return "{}"
+	}
+	return string(b)
+}
+
+func openAIToolsToAnthropic(value any) []map[string]any {
+	var out []map[string]any
+	for _, raw := range slice(value) {
+		tool := asMap(raw)
+		if stringOr(tool["type"], "function") != "function" {
+			continue
+		}
+		function := asMap(tool["function"])
+		out = append(out, map[string]any{"name": stringField(function, "name"), "description": stringField(function, "description"), "input_schema": function["parameters"]})
+	}
+	return out
+}
+
+func anthropicToolsToOpenAI(value any) []map[string]any {
+	var out []map[string]any
+	for _, raw := range slice(value) {
+		tool := asMap(raw)
+		if typ := stringField(tool, "type"); typ != "" && typ != "custom" {
+			continue
+		}
+		out = append(out, map[string]any{"type": "function", "function": map[string]any{"name": stringField(tool, "name"), "description": stringField(tool, "description"), "parameters": tool["input_schema"]}})
+	}
+	return out
+}
+
+func openAIToolChoiceToAnthropic(value any) any {
+	if value == nil {
+		return nil
+	}
+	if text, ok := value.(string); ok {
+		switch text {
+		case "none":
+			return map[string]any{"type": "none"}
+		case "required":
+			return map[string]any{"type": "any"}
+		case "auto":
+			return map[string]any{"type": "auto"}
+		}
+	}
+	choice := asMap(value)
+	if function := asMap(choice["function"]); len(function) > 0 {
+		return map[string]any{"type": "tool", "name": stringField(function, "name")}
+	}
+	return nil
+}
+
+func anthropicToolChoiceToOpenAI(value any) any {
+	choice := asMap(value)
+	if len(choice) == 0 {
+		return nil
+	}
+	switch stringField(choice, "type") {
+	case "none":
+		return "none"
+	case "any":
+		return "required"
+	case "auto":
+		return "auto"
+	case "tool":
+		return map[string]any{"type": "function", "function": map[string]any{"name": stringField(choice, "name")}}
+	default:
+		return nil
+	}
 }
 
 func responsesToChatCompletions(in map[string]any, modelName string) map[string]any {
@@ -437,7 +672,31 @@ func openAIToGemini(in map[string]any) map[string]any {
 		if role == "assistant" {
 			gRole = "model"
 		}
-		contents = append(contents, map[string]any{"role": gRole, "parts": []map[string]any{{"text": contentText(msg["content"])}}})
+		if role == "tool" || role == "function" {
+			name := stringField(msg, "name")
+			if name == "" {
+				name = stringField(msg, "tool_call_id")
+			}
+			contents = append(contents, map[string]any{"role": "user", "parts": []map[string]any{{"functionResponse": map[string]any{"name": name, "response": parseToolArguments(msg["content"])}}}})
+			continue
+		}
+		parts := []map[string]any{}
+		if text := contentText(msg["content"]); text != "" {
+			parts = append(parts, map[string]any{"text": text})
+		}
+		for _, rawCall := range slice(msg["tool_calls"]) {
+			call := asMap(rawCall)
+			function := asMap(call["function"])
+			functionCall := map[string]any{"name": stringField(function, "name"), "args": parseToolArguments(function["arguments"])}
+			if id := stringField(call, "id"); id != "" {
+				functionCall["id"] = id
+			}
+			parts = append(parts, map[string]any{"functionCall": functionCall})
+		}
+		if len(parts) == 0 {
+			parts = append(parts, map[string]any{"text": ""})
+		}
+		contents = append(contents, map[string]any{"role": gRole, "parts": parts})
 	}
 	out := map[string]any{"contents": contents}
 	if system != nil {
@@ -461,6 +720,12 @@ func openAIToGemini(in map[string]any) map[string]any {
 	if len(cfg) > 0 {
 		out["generationConfig"] = cfg
 	}
+	if tools := openAIToolsToGemini(in["tools"]); len(tools) > 0 {
+		out["tools"] = []map[string]any{{"functionDeclarations": tools}}
+	}
+	if choice := openAIToolChoiceToGemini(in["tool_choice"]); choice != nil {
+		out["toolConfig"] = choice
+	}
 	return out
 }
 
@@ -475,7 +740,44 @@ func geminiToOpenAI(in map[string]any, modelName string) map[string]any {
 		if stringField(msg, "role") == "model" {
 			role = "assistant"
 		}
-		messages = append(messages, map[string]any{"role": role, "content": partsText(msg["parts"])})
+		var text strings.Builder
+		var toolCalls []map[string]any
+		var toolResponses []map[string]any
+		for _, rawPart := range slice(msg["parts"]) {
+			part := asMap(rawPart)
+			if value := stringField(part, "text"); value != "" {
+				text.WriteString(value)
+			}
+			if call := asMap(part["functionCall"]); len(call) > 0 {
+				id := stringField(call, "id")
+				if id == "" {
+					id = stringField(call, "name")
+				}
+				toolCalls = append(toolCalls, map[string]any{"id": id, "type": "function", "function": map[string]any{"name": stringField(call, "name"), "arguments": stringifyToolArguments(call["args"])}})
+			}
+			if response := asMap(part["functionResponse"]); len(response) > 0 {
+				id := stringField(response, "id")
+				if id == "" {
+					id = stringField(response, "name")
+				}
+				toolResponses = append(toolResponses, map[string]any{"role": "tool", "tool_call_id": id, "name": stringField(response, "name"), "content": stringifyToolArguments(response["response"])})
+			}
+		}
+		if len(toolResponses) > 0 {
+			messages = append(messages, toolResponses...)
+			if text.Len() > 0 {
+				messages = append(messages, map[string]any{"role": "user", "content": text.String()})
+			}
+			continue
+		}
+		message := map[string]any{"role": role, "content": text.String()}
+		if len(toolCalls) > 0 {
+			message["tool_calls"] = toolCalls
+			if text.Len() == 0 {
+				message["content"] = nil
+			}
+		}
+		messages = append(messages, message)
 	}
 	out := map[string]any{"model": modelName, "messages": messages, "stream": false}
 	if cfg := asMap(in["generationConfig"]); len(cfg) > 0 {
@@ -492,7 +794,84 @@ func geminiToOpenAI(in map[string]any, modelName string) map[string]any {
 			out["stop"] = v
 		}
 	}
+	if tools := geminiToolsToOpenAI(in["tools"]); len(tools) > 0 {
+		out["tools"] = tools
+	}
+	if choice := geminiToolChoiceToOpenAI(in["toolConfig"]); choice != nil {
+		out["tool_choice"] = choice
+	}
 	return out
+}
+
+func openAIToolsToGemini(value any) []map[string]any {
+	var out []map[string]any
+	for _, raw := range slice(value) {
+		function := asMap(asMap(raw)["function"])
+		if stringOr(asMap(raw)["type"], "function") != "function" || stringField(function, "name") == "" {
+			continue
+		}
+		out = append(out, map[string]any{"name": stringField(function, "name"), "description": stringField(function, "description"), "parameters": function["parameters"]})
+	}
+	return out
+}
+
+func geminiToolsToOpenAI(value any) []map[string]any {
+	var out []map[string]any
+	for _, rawTool := range slice(value) {
+		for _, rawDeclaration := range slice(asMap(rawTool)["functionDeclarations"]) {
+			declaration := asMap(rawDeclaration)
+			if name := stringField(declaration, "name"); name != "" {
+				out = append(out, map[string]any{"type": "function", "function": map[string]any{"name": name, "description": stringField(declaration, "description"), "parameters": declaration["parameters"]}})
+			}
+		}
+	}
+	return out
+}
+
+func openAIToolChoiceToGemini(value any) any {
+	if value == nil {
+		return nil
+	}
+	config := map[string]any{}
+	if text, ok := value.(string); ok {
+		switch text {
+		case "none":
+			config["mode"] = "NONE"
+		case "required":
+			config["mode"] = "ANY"
+		case "auto":
+			config["mode"] = "AUTO"
+		}
+	} else if function := asMap(asMap(value)["function"]); stringField(function, "name") != "" {
+		config["mode"] = "ANY"
+		config["allowedFunctionNames"] = []string{stringField(function, "name")}
+	}
+	if len(config) == 0 {
+		return nil
+	}
+	return map[string]any{"functionCallingConfig": config}
+}
+
+func geminiToolChoiceToOpenAI(value any) any {
+	config := asMap(asMap(value)["functionCallingConfig"])
+	if len(config) == 0 {
+		return nil
+	}
+	if names := slice(config["allowedFunctionNames"]); len(names) > 0 {
+		if name, ok := names[0].(string); ok && name != "" {
+			return map[string]any{"type": "function", "function": map[string]any{"name": name}}
+		}
+	}
+	switch strings.ToUpper(stringField(config, "mode")) {
+	case "NONE":
+		return "none"
+	case "ANY":
+		return "required"
+	case "AUTO":
+		return "auto"
+	default:
+		return nil
+	}
 }
 
 func validateCrossProtocolRequest(raw map[string]any, inbound, upstream string) error {
@@ -510,46 +889,52 @@ func validateCrossProtocolRequest(raw map[string]any, inbound, upstream string) 
 		if _, hasPrompt := raw["prompt"]; hasPrompt && len(slice(raw["messages"])) == 0 {
 			return unsupportedCrossProtocol(inbound, upstream, "legacy completions prompt")
 		}
-		for _, field := range []string{"tools", "tool_choice", "functions", "function_call", "response_format", "modalities", "audio", "logprobs", "top_logprobs"} {
+		for _, field := range []string{"functions", "function_call", "response_format", "modalities", "audio", "logprobs", "top_logprobs"} {
 			if meaningful(raw[field]) {
 				return unsupportedCrossProtocol(inbound, upstream, field)
 			}
+		}
+		if err := validateOpenAITools(raw, inbound, upstream); err != nil {
+			return err
 		}
 		for _, item := range slice(raw["messages"]) {
 			message := asMap(item)
-			if role := stringField(message, "role"); role == "tool" || role == "function" {
-				return unsupportedCrossProtocol(inbound, upstream, role+" message")
+			if role := stringField(message, "role"); role == "function" {
+				return unsupportedCrossProtocol(inbound, upstream, "function message")
 			}
-			if meaningful(message["tool_calls"]) || meaningful(message["function_call"]) {
-				return unsupportedCrossProtocol(inbound, upstream, "message tool calls")
-			}
-			if err := validateTextOnlyContent(message["content"], inbound, upstream); err != nil {
+			if err := validateOpenAIMessageTools(message, inbound, upstream); err != nil {
 				return err
+			}
+			if stringField(message, "role") != "tool" {
+				if err := validateTextOnlyContent(message["content"], inbound, upstream); err != nil {
+					return err
+				}
 			}
 		}
 	case router.ProtocolAnthropic:
-		for _, field := range []string{"tools", "tool_choice", "thinking"} {
-			if meaningful(raw[field]) {
-				return unsupportedCrossProtocol(inbound, upstream, field)
-			}
+		if meaningful(raw["thinking"]) {
+			return unsupportedCrossProtocol(inbound, upstream, "thinking")
+		}
+		if err := validateAnthropicTools(raw, inbound, upstream); err != nil {
+			return err
 		}
 		for _, item := range slice(raw["messages"]) {
-			if err := validateTextOnlyContent(asMap(item)["content"], inbound, upstream); err != nil {
+			if err := validateAnthropicContent(asMap(item)["content"], inbound, upstream); err != nil {
 				return err
 			}
 		}
 	case router.ProtocolGemini:
-		for _, field := range []string{"tools", "toolConfig", "safetySettings", "cachedContent"} {
+		for _, field := range []string{"safetySettings", "cachedContent"} {
 			if meaningful(raw[field]) {
 				return unsupportedCrossProtocol(inbound, upstream, field)
 			}
 		}
+		if err := validateGeminiTools(raw, inbound, upstream); err != nil {
+			return err
+		}
 		for _, item := range slice(raw["contents"]) {
-			for _, part := range slice(asMap(item)["parts"]) {
-				block := asMap(part)
-				if len(block) != 1 || block["text"] == nil {
-					return unsupportedCrossProtocol(inbound, upstream, "non-text content part")
-				}
+			if err := validateGeminiParts(asMap(item)["parts"], inbound, upstream); err != nil {
+				return err
 			}
 		}
 		if cfg := asMap(raw["generationConfig"]); len(cfg) > 0 {
@@ -562,6 +947,86 @@ func validateCrossProtocolRequest(raw map[string]any, inbound, upstream string) 
 					}
 				}
 			}
+		}
+	}
+	return nil
+}
+
+func validateOpenAITools(raw map[string]any, inbound, upstream string) error {
+	for _, rawTool := range slice(raw["tools"]) {
+		tool := asMap(rawTool)
+		if stringOr(tool["type"], "function") != "function" || len(asMap(tool["function"])) == 0 {
+			return unsupportedCrossProtocol(inbound, upstream, "non-function tool")
+		}
+		if stringField(asMap(tool["function"]), "name") == "" {
+			return unsupportedCrossProtocol(inbound, upstream, "unnamed function tool")
+		}
+	}
+	if choice := raw["tool_choice"]; meaningful(choice) {
+		if text, ok := choice.(string); ok && text != "auto" && text != "none" && text != "required" {
+			return unsupportedCrossProtocol(inbound, upstream, "tool_choice "+text)
+		}
+	}
+	return nil
+}
+
+func validateOpenAIMessageTools(message map[string]any, inbound, upstream string) error {
+	for _, rawCall := range slice(message["tool_calls"]) {
+		call := asMap(rawCall)
+		if stringOr(call["type"], "function") != "function" || stringField(asMap(call["function"]), "name") == "" {
+			return unsupportedCrossProtocol(inbound, upstream, "non-function tool call")
+		}
+	}
+	return nil
+}
+
+func validateAnthropicTools(raw map[string]any, inbound, upstream string) error {
+	for _, rawTool := range slice(raw["tools"]) {
+		tool := asMap(rawTool)
+		if stringField(tool, "name") == "" || tool["input_schema"] == nil {
+			return unsupportedCrossProtocol(inbound, upstream, "invalid tool definition")
+		}
+		if typ := stringField(tool, "type"); typ != "" && typ != "custom" {
+			return unsupportedCrossProtocol(inbound, upstream, "server tool "+typ)
+		}
+	}
+	return nil
+}
+
+func validateAnthropicContent(value any, inbound, upstream string) error {
+	if _, ok := value.(string); ok || value == nil {
+		return nil
+	}
+	for _, raw := range slice(value) {
+		part := asMap(raw)
+		switch stringField(part, "type") {
+		case "text", "tool_use", "tool_result":
+		default:
+			return unsupportedCrossProtocol(inbound, upstream, "content block "+stringField(part, "type"))
+		}
+	}
+	return nil
+}
+
+func validateGeminiTools(raw map[string]any, inbound, upstream string) error {
+	for _, rawTool := range slice(raw["tools"]) {
+		if len(slice(asMap(rawTool)["functionDeclarations"])) == 0 {
+			return unsupportedCrossProtocol(inbound, upstream, "non-function tool")
+		}
+	}
+	if config := asMap(raw["toolConfig"]); len(config) > 0 {
+		if calling := asMap(config["functionCallingConfig"]); len(calling) == 0 {
+			return unsupportedCrossProtocol(inbound, upstream, "invalid toolConfig")
+		}
+	}
+	return nil
+}
+
+func validateGeminiParts(value any, inbound, upstream string) error {
+	for _, raw := range slice(value) {
+		part := asMap(raw)
+		if len(part) != 1 || (part["text"] == nil && part["functionCall"] == nil && part["functionResponse"] == nil) {
+			return unsupportedCrossProtocol(inbound, upstream, "unsupported content part")
 		}
 	}
 	return nil
@@ -766,69 +1231,44 @@ func meaningful(value any) bool {
 }
 
 func anthropicToGemini(in map[string]any) map[string]any {
-	var contents []map[string]any
-	if sys := contentText(in["system"]); sys != "" {
-		contents = append(contents, map[string]any{"role": "user", "parts": []map[string]any{{"text": sys}}})
-	}
-	for _, item := range slice(in["messages"]) {
-		msg := asMap(item)
-		role := "user"
-		if stringField(msg, "role") == "assistant" {
-			role = "model"
-		}
-		contents = append(contents, map[string]any{"role": role, "parts": []map[string]any{{"text": contentText(msg["content"])}}})
-	}
-	out := map[string]any{"contents": contents}
-	cfg := map[string]any{}
-	if v, ok := in["max_tokens"]; ok {
-		cfg["maxOutputTokens"] = v
-	}
-	if v, ok := in["temperature"]; ok {
-		cfg["temperature"] = v
-	}
-	if len(cfg) > 0 {
-		out["generationConfig"] = cfg
-	}
-	return out
+	return openAIToGemini(anthropicToOpenAI(in, stringField(in, "model")))
 }
 
 func geminiToAnthropic(in map[string]any, modelName string) map[string]any {
-	var messages []map[string]any
-	for _, item := range slice(in["contents"]) {
-		msg := asMap(item)
-		role := "user"
-		if stringField(msg, "role") == "model" {
-			role = "assistant"
-		}
-		messages = append(messages, map[string]any{"role": role, "content": []map[string]any{{"type": "text", "text": partsText(msg["parts"])}}})
-	}
-	out := map[string]any{"model": modelName, "messages": messages, "max_tokens": 4096, "stream": false}
-	if sys := asMap(in["systemInstruction"]); len(sys) > 0 {
-		out["system"] = partsText(sys["parts"])
-	}
-	if cfg := asMap(in["generationConfig"]); len(cfg) > 0 {
-		if v, ok := cfg["maxOutputTokens"]; ok {
-			out["max_tokens"] = v
-		}
-		if v, ok := cfg["temperature"]; ok {
-			out["temperature"] = v
-		}
-	}
-	return out
+	return openAIToAnthropic(geminiToOpenAI(in, modelName), modelName)
 }
 
 func anthropicResponseToOpenAI(in map[string]any) map[string]any {
-	text := ""
-	for _, part := range slice(in["content"]) {
-		text += stringField(asMap(part), "text")
+	text, toolCalls, _ := anthropicContentToOpenAI(in["content"])
+	message := map[string]any{"role": "assistant", "content": text}
+	finish := stringOr(in["stop_reason"], "stop")
+	if len(toolCalls) > 0 {
+		message["tool_calls"] = toolCalls
+		if text == "" {
+			message["content"] = nil
+		}
+		finish = "tool_calls"
 	}
-	return map[string]any{"id": fmt.Sprintf("chatcmpl-%d", nowUnix()), "object": "chat.completion", "created": nowUnix(), "model": stringField(in, "model"), "choices": []map[string]any{{"index": 0, "message": map[string]any{"role": "assistant", "content": text}, "finish_reason": stringOr(in["stop_reason"], "stop")}}, "usage": map[string]any{"prompt_tokens": usageInt(in, "usage", "input_tokens"), "completion_tokens": usageInt(in, "usage", "output_tokens"), "total_tokens": usageInt(in, "usage", "input_tokens") + usageInt(in, "usage", "output_tokens")}}
+	return map[string]any{"id": fmt.Sprintf("chatcmpl-%d", nowUnix()), "object": "chat.completion", "created": nowUnix(), "model": stringField(in, "model"), "choices": []map[string]any{{"index": 0, "message": message, "finish_reason": finish}}, "usage": map[string]any{"prompt_tokens": usageInt(in, "usage", "input_tokens"), "completion_tokens": usageInt(in, "usage", "output_tokens"), "total_tokens": usageInt(in, "usage", "input_tokens") + usageInt(in, "usage", "output_tokens")}}
 }
 
 func openAIResponseToAnthropic(in map[string]any) map[string]any {
 	choice := firstMap(in["choices"])
 	msg := asMap(choice["message"])
-	return map[string]any{"id": fmt.Sprintf("msg_%d", nowUnix()), "type": "message", "role": "assistant", "model": stringField(in, "model"), "content": []map[string]any{{"type": "text", "text": contentText(msg["content"])}}, "stop_reason": stringOr(choice["finish_reason"], "end_turn"), "usage": map[string]any{"input_tokens": usageInt(in, "usage", "prompt_tokens"), "output_tokens": usageInt(in, "usage", "completion_tokens")}}
+	content := openAIContentToAnthropic(msg["content"])
+	for _, rawCall := range slice(msg["tool_calls"]) {
+		call := asMap(rawCall)
+		function := asMap(call["function"])
+		content = append(content, map[string]any{"type": "tool_use", "id": stringField(call, "id"), "name": stringField(function, "name"), "input": parseToolArguments(function["arguments"])})
+	}
+	if len(content) == 0 {
+		content = []map[string]any{{"type": "text", "text": ""}}
+	}
+	stopReason := stringOr(choice["finish_reason"], "end_turn")
+	if len(slice(msg["tool_calls"])) > 0 {
+		stopReason = "tool_use"
+	}
+	return map[string]any{"id": fmt.Sprintf("msg_%d", nowUnix()), "type": "message", "role": "assistant", "model": stringField(in, "model"), "content": content, "stop_reason": stopReason, "usage": map[string]any{"input_tokens": usageInt(in, "usage", "prompt_tokens"), "output_tokens": usageInt(in, "usage", "completion_tokens")}}
 }
 
 func chatCompletionResponseToResponses(in map[string]any) map[string]any {
@@ -944,32 +1384,90 @@ func geminiResponseToOpenAI(in map[string]any) map[string]any {
 	candidate := firstMap(in["candidates"])
 	content := asMap(candidate["content"])
 	prompt, completion, total := usageInt(in, "usageMetadata", "promptTokenCount"), usageInt(in, "usageMetadata", "candidatesTokenCount"), usageInt(in, "usageMetadata", "totalTokenCount")
-	return map[string]any{"id": fmt.Sprintf("chatcmpl-%d", nowUnix()), "object": "chat.completion", "created": nowUnix(), "choices": []map[string]any{{"index": 0, "message": map[string]any{"role": "assistant", "content": partsText(content["parts"])}, "finish_reason": stringOr(candidate["finishReason"], "stop")}}, "usage": map[string]any{"prompt_tokens": prompt, "completion_tokens": completion, "total_tokens": total}}
+	chat := geminiToOpenAI(map[string]any{"contents": []any{content}}, "")
+	message := firstMap(chat["messages"])
+	finish := stringOr(candidate["finishReason"], "stop")
+	if len(slice(message["tool_calls"])) > 0 {
+		finish = "tool_calls"
+	}
+	return map[string]any{"id": fmt.Sprintf("chatcmpl-%d", nowUnix()), "object": "chat.completion", "created": nowUnix(), "choices": []map[string]any{{"index": 0, "message": message, "finish_reason": finish}}, "usage": map[string]any{"prompt_tokens": prompt, "completion_tokens": completion, "total_tokens": total}}
 }
 
 func openAIResponseToGemini(in map[string]any) map[string]any {
 	choice := firstMap(in["choices"])
 	msg := asMap(choice["message"])
-	return geminiResponse(contentText(msg["content"]), stringOr(choice["finish_reason"], "STOP"), usageInt(in, "usage", "prompt_tokens"), usageInt(in, "usage", "completion_tokens"), usageInt(in, "usage", "total_tokens"))
+	response := geminiResponse(contentText(msg["content"]), stringOr(choice["finish_reason"], "STOP"), usageInt(in, "usage", "prompt_tokens"), usageInt(in, "usage", "completion_tokens"), usageInt(in, "usage", "total_tokens"))
+	candidate := firstMap(response["candidates"])
+	content := asMap(candidate["content"])
+	parts := slice(content["parts"])
+	for _, rawCall := range slice(msg["tool_calls"]) {
+		call := asMap(rawCall)
+		function := asMap(call["function"])
+		parts = append(parts, map[string]any{"functionCall": map[string]any{"id": stringField(call, "id"), "name": stringField(function, "name"), "args": parseToolArguments(function["arguments"])}})
+	}
+	content["parts"] = parts
+	return response
 }
 
 func anthropicResponseToGemini(in map[string]any) map[string]any {
-	text := ""
+	parts := []map[string]any{}
 	for _, part := range slice(in["content"]) {
-		text += stringField(asMap(part), "text")
+		block := asMap(part)
+		if text := stringField(block, "text"); text != "" {
+			parts = append(parts, map[string]any{"text": text})
+		}
+		if stringField(block, "type") == "tool_use" {
+			call := map[string]any{"name": stringField(block, "name"), "args": parseToolArguments(block["input"])}
+			if id := stringField(block, "id"); id != "" {
+				call["id"] = id
+			}
+			parts = append(parts, map[string]any{"functionCall": call})
+		}
 	}
 	prompt, completion := usageInt(in, "usage", "input_tokens"), usageInt(in, "usage", "output_tokens")
-	return geminiResponse(text, stringOr(in["stop_reason"], "STOP"), prompt, completion, prompt+completion)
+	finish := stringOr(in["stop_reason"], "STOP")
+	if strings.Contains(finish, "tool") {
+		finish = "STOP"
+	}
+	return geminiResponseParts(parts, finish, prompt, completion, prompt+completion)
 }
 
 func geminiResponseToAnthropic(in map[string]any) map[string]any {
 	candidate := firstMap(in["candidates"])
 	content := asMap(candidate["content"])
-	return map[string]any{"id": fmt.Sprintf("msg_%d", nowUnix()), "type": "message", "role": "assistant", "content": []map[string]any{{"type": "text", "text": partsText(content["parts"])}}, "stop_reason": stringOr(candidate["finishReason"], "end_turn"), "usage": map[string]any{"input_tokens": usageInt(in, "usageMetadata", "promptTokenCount"), "output_tokens": usageInt(in, "usageMetadata", "candidatesTokenCount")}}
+	blocks := []map[string]any{}
+	for _, rawPart := range slice(content["parts"]) {
+		part := asMap(rawPart)
+		if text := stringField(part, "text"); text != "" {
+			blocks = append(blocks, map[string]any{"type": "text", "text": text})
+		}
+		if call := asMap(part["functionCall"]); len(call) > 0 {
+			id := stringField(call, "id")
+			if id == "" {
+				id = stringField(call, "name")
+			}
+			blocks = append(blocks, map[string]any{"type": "tool_use", "id": id, "name": stringField(call, "name"), "input": parseToolArguments(call["args"])})
+		}
+	}
+	if len(blocks) == 0 {
+		blocks = append(blocks, map[string]any{"type": "text", "text": ""})
+	}
+	stop := stringOr(candidate["finishReason"], "end_turn")
+	if len(blocks) > 0 && blocks[len(blocks)-1]["type"] == "tool_use" {
+		stop = "tool_use"
+	}
+	return map[string]any{"id": fmt.Sprintf("msg_%d", nowUnix()), "type": "message", "role": "assistant", "content": blocks, "stop_reason": stop, "usage": map[string]any{"input_tokens": usageInt(in, "usageMetadata", "promptTokenCount"), "output_tokens": usageInt(in, "usageMetadata", "candidatesTokenCount")}}
 }
 
 func geminiResponse(text, finish string, prompt, completion, total int) map[string]any {
-	return map[string]any{"candidates": []map[string]any{{"content": map[string]any{"role": "model", "parts": []map[string]any{{"text": text}}}, "finishReason": finish, "index": 0}}, "usageMetadata": map[string]any{"promptTokenCount": prompt, "candidatesTokenCount": completion, "totalTokenCount": total}}
+	return geminiResponseParts([]map[string]any{{"text": text}}, finish, prompt, completion, total)
+}
+
+func geminiResponseParts(parts []map[string]any, finish string, prompt, completion, total int) map[string]any {
+	if len(parts) == 0 {
+		parts = []map[string]any{{"text": ""}}
+	}
+	return map[string]any{"candidates": []map[string]any{{"content": map[string]any{"role": "model", "parts": parts}, "finishReason": finish, "index": 0}}, "usageMetadata": map[string]any{"promptTokenCount": prompt, "candidatesTokenCount": completion, "totalTokenCount": total}}
 }
 
 func chatMessagesToResponses(value any) []map[string]any {

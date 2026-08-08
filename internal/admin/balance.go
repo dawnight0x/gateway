@@ -95,9 +95,9 @@ func balancePathsForKey(key model.Key) []string {
 	}
 	switch key.ProviderType {
 	case model.ProviderNewAPI:
-		return []string{"/api/user/self", "/api/usage/token/", "/api/user/token", "/dashboard/billing/subscription", "/v1/dashboard/billing/subscription"}
+		return []string{"/api/usage/token/", "/api/dashboard/billing/subscription", "/api/v1/dashboard/billing/subscription"}
 	case model.ProviderSub2API:
-		return []string{"/v1/usage", "/api/v1/user/profile", "/api/v1/auth/me"}
+		return []string{"/v1/usage"}
 	default:
 		return nil
 	}
