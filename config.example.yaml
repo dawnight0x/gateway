@@ -17,6 +17,10 @@ server:
   read_timeout_seconds: 30
   idle_timeout_seconds: 120
   max_header_bytes: 1048576
+  # 停机时先拒绝新请求，并留出时间让负载均衡器观察到 draining 状态。
+  drain_grace_seconds: 2
+  # 等待进行中请求结束；应不小于普通上游请求超时。
+  shutdown_timeout_seconds: 180
 
 routing:
   failure_threshold: 5

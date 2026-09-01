@@ -1558,3 +1558,38 @@ func TestClientCancellationDoesNotPenalizeUpstreamKey(t *testing.T) {
 		t.Fatalf("canceled request changed key health: %#v", keys)
 	}
 }
+
+func TestDrainingRejectsNewRequestsAndReadiness(t *testing.T) {
+	st := testStore(t)
+	cfg := config.Default()
+	cfg.Server.ProxyToken = "local-token"
+	svc := New(st, router.New(st, cfg.Routing), cfg)
+	svc.BeginDrain()
+
+	mux := http.NewServeMux()
+	svc.Register(mux)
+	gw := httptest.NewServer(mux)
+	defer gw.Close()
+
+	ready, err := http.Get(gw.URL + "/ready")
+	if err != nil {
+		t.Fatal(err)
+	}
+	readyBody, _ := io.ReadAll(ready.Body)
+	_ = ready.Body.Close()
+	if ready.StatusCode != http.StatusServiceUnavailable || !strings.Contains(string(readyBody), `"status":"draining"`) {
+		t.Fatalf("draining readiness = %d %s", ready.StatusCode, readyBody)
+	}
+
+	req, _ := http.NewRequest(http.MethodPost, gw.URL+"/v1/chat/completions", strings.NewReader(`{"model":"gpt","messages":[]}`))
+	req.Header.Set("Authorization", "Bearer local-token")
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(res.Body)
+	_ = res.Body.Close()
+	if res.StatusCode != http.StatusServiceUnavailable || !strings.Contains(string(body), "gateway_draining") || res.Header.Get("Retry-After") == "" {
+		t.Fatalf("draining response = %d %s headers=%v", res.StatusCode, body, res.Header)
+	}
+}

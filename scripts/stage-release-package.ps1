@@ -30,19 +30,25 @@ if ($Destination -eq [System.IO.Path]::GetPathRoot($Destination) -or
 New-Item -ItemType Directory -Force -Path $Destination | Out-Null
 
 $sourceManifestLines = @()
-$sourcePaths = @(& git -C $Root ls-files --cached --others --exclude-standard) | Sort-Object -Unique
+$sourcePaths = @(& git -C $Root ls-files --cached) | Sort-Object -Unique
 if ($LASTEXITCODE -ne 0) {
   throw "git ls-files failed with exit code $LASTEXITCODE"
 }
-foreach ($relative in $sourcePaths) {
-  $sourcePath = [System.IO.Path]::GetFullPath((Join-Path $Root $relative))
-  if ($sourcePath.StartsWith($destinationPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
-    continue
-  }
-  if (Test-Path -LiteralPath $sourcePath -PathType Leaf) {
+$manifestTemp = Join-Path ([System.IO.Path]::GetTempPath()) ("gateway-source-manifest-" + [Guid]::NewGuid().ToString("N"))
+New-Item -ItemType Directory -Path $manifestTemp | Out-Null
+try {
+  foreach ($relative in $sourcePaths) {
+    $gitPath = $relative.Replace('\', '/')
+    $sourcePath = Join-Path $manifestTemp ([Guid]::NewGuid().ToString("N"))
+    & git -C $Root show "--output=$sourcePath" "HEAD:$gitPath"
+    if ($LASTEXITCODE -ne 0) {
+      throw "read committed source file $gitPath failed with exit code $LASTEXITCODE"
+    }
     $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $sourcePath).Hash.ToLowerInvariant()
-    $sourceManifestLines += "$hash  $($relative.Replace('\', '/'))"
+    $sourceManifestLines += "$hash  $gitPath"
   }
+} finally {
+  Remove-Item -LiteralPath $manifestTemp -Recurse -Force
 }
 
 $sourceManifestText = ($sourceManifestLines -join "`n") + "`n"
@@ -51,9 +57,11 @@ $sourceDigest = [Convert]::ToHexString($sourceDigestBytes).ToLowerInvariant()
 
 Copy-Item -LiteralPath (Join-Path $Root "docs\README-distribution.md") -Destination (Join-Path $Destination "README.md")
 Copy-Item -LiteralPath (Join-Path $Root "config.example.yaml") -Destination (Join-Path $Destination "config.example.yaml")
+Copy-Item -LiteralPath (Join-Path $Root "CHANGELOG.md") -Destination (Join-Path $Destination "CHANGELOG.md")
+Copy-Item -LiteralPath (Join-Path $Root "SECURITY.md") -Destination (Join-Path $Destination "SECURITY.md")
 $docsDestination = Join-Path $Destination "docs"
 New-Item -ItemType Directory -Force -Path $docsDestination | Out-Null
-foreach ($doc in @("linux.md", "operations.md", "protocol-compatibility.md")) {
+foreach ($doc in @("linux.md", "operations.md", "protocol-compatibility.md", "upgrade.md")) {
   Copy-Item -LiteralPath (Join-Path $Root "docs\$doc") -Destination (Join-Path $docsDestination $doc)
 }
 

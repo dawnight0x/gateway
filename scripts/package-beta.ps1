@@ -1,11 +1,17 @@
 param(
-  [string]$OutputRoot = "E:\gateway-beta",
+  [string]$OutputRoot = "",
   [string]$Version = "",
-  [string]$PackageName = ""
+  [string]$PackageName = "",
+  [switch]$AllowDirty
 )
 
 $ErrorActionPreference = "Stop"
 $Root = [System.IO.Path]::GetFullPath((Split-Path -Parent $PSScriptRoot))
+$OutputRoot = if ([string]::IsNullOrWhiteSpace($OutputRoot)) {
+  Join-Path $Root "..\gateway-beta"
+} else {
+  $OutputRoot
+}
 $ReleaseMetadataPath = Join-Path $Root "release.json"
 try {
   $ReleaseMetadata = Get-Content -Raw -LiteralPath $ReleaseMetadataPath | ConvertFrom-Json -ErrorAction Stop
@@ -23,9 +29,9 @@ $outputLeaf = [System.IO.Path]::GetFileName($OutputRoot)
 if ([string]::IsNullOrWhiteSpace($outputLeaf) -or $OutputRoot -eq [System.IO.Path]::GetPathRoot($OutputRoot)) {
   throw "refusing to package into unsafe output root: $OutputRoot"
 }
-$versionMatch = [regex]::Match($Version, '^(?<major>0|[1-9][0-9]*)\.(?<minor>0|[1-9][0-9]*)\.(?<patch>0|[1-9][0-9]*)$')
+$versionMatch = [regex]::Match($Version, '^(?<major>0|[1-9][0-9]*)\.(?<minor>0|[1-9][0-9]*)\.(?<patch>0|[1-9][0-9]*)(?<prerelease>-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?$')
 if (-not $versionMatch.Success) {
-  throw "version must use major.minor.patch format: $Version"
+  throw "version must use major.minor.patch with an optional prerelease suffix: $Version"
 }
 if ($PackageName -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]*$') {
   throw "package name contains unsupported characters: $PackageName"
@@ -46,11 +52,17 @@ if (-not (Test-Path -LiteralPath $Go)) {
 $Tar = (Get-Command tar -ErrorAction Stop).Source
 $BuiltAt = [DateTime]::UtcNow.ToString("o")
 $Commit = "unknown"
+$worktreeChanges = @(& git -C $Root status --porcelain=v1 --untracked-files=normal 2>$null)
+if ($LASTEXITCODE -ne 0) {
+  throw "git status failed with exit code $LASTEXITCODE"
+}
+if ($worktreeChanges.Count -gt 0 -and -not $AllowDirty) {
+  throw "working tree contains uncommitted changes; commit them before packaging or pass -AllowDirty for a development build"
+}
 try {
   $candidateCommit = (& git -C $Root rev-parse --verify HEAD 2>$null).Trim()
   if ($LASTEXITCODE -eq 0 -and $candidateCommit) {
     $Commit = $candidateCommit
-    $worktreeChanges = @(& git -C $Root status --porcelain=v1 --untracked-files=normal)
     if ($worktreeChanges.Count -gt 0) {
       $Commit += "-dirty"
     }
@@ -145,8 +157,8 @@ try {
   Move-Item -LiteralPath $WinStage -Destination $WinTarget
   Move-Item -LiteralPath $LinuxStage -Destination $LinuxTarget
 
-  $WinArchive = Join-Path $OutputRoot ("$PackageName-win-x64.zip")
-  $LinuxArchive = Join-Path $OutputRoot ("$PackageName-linux-amd64.tar.gz")
+  $WinArchive = Join-Path $OutputRoot ("$PackageName-$Version-win-x64.zip")
+  $LinuxArchive = Join-Path $OutputRoot ("$PackageName-$Version-linux-amd64.tar.gz")
   foreach ($archive in @($WinArchive,$LinuxArchive)) {
     if (Test-Path -LiteralPath $archive) {
       Remove-Item -LiteralPath $archive -Force
@@ -158,7 +170,7 @@ try {
     throw "Linux tar archive creation failed"
   }
 
-  $TopChecksums = Join-Path $OutputRoot ("$PackageName-SHA256SUMS.txt")
+  $TopChecksums = Join-Path $OutputRoot ("$PackageName-$Version-SHA256SUMS.txt")
   $archiveFiles = @($WinArchive,$LinuxArchive)
   $archiveLines = foreach ($archive in $archiveFiles) {
     $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $archive).Hash.ToLowerInvariant()

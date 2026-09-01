@@ -44,6 +44,8 @@ type ServerConfig struct {
 	ReadTimeoutSeconds     int    `yaml:"read_timeout_seconds" json:"readTimeoutSeconds"`
 	IdleTimeoutSeconds     int    `yaml:"idle_timeout_seconds" json:"idleTimeoutSeconds"`
 	MaxHeaderBytes         int    `yaml:"max_header_bytes" json:"maxHeaderBytes"`
+	DrainGraceSeconds      int    `yaml:"drain_grace_seconds" json:"drainGraceSeconds"`
+	ShutdownTimeoutSeconds int    `yaml:"shutdown_timeout_seconds" json:"shutdownTimeoutSeconds"`
 }
 
 type RoutingConfig struct {
@@ -92,6 +94,19 @@ type TrayConfig struct {
 }
 
 func Default() Config {
+	return defaultConfig(runtimeModeOrPortable())
+}
+
+func defaultConfig(mode string) Config {
+	storagePath := "data/gateway.db"
+	secretPath := "data/secret.key"
+	adminPath := "data/admin.token"
+	if mode == "installed" {
+		dataDir := installedDataDir()
+		storagePath = filepath.Join(dataDir, "gateway.db")
+		secretPath = filepath.Join(dataDir, "secret.key")
+		adminPath = filepath.Join(dataDir, "admin.token")
+	}
 	return Config{
 		Server: ServerConfig{
 			Host:                   "127.0.0.1",
@@ -103,6 +118,8 @@ func Default() Config {
 			ReadTimeoutSeconds:     30,
 			IdleTimeoutSeconds:     120,
 			MaxHeaderBytes:         1 << 20,
+			DrainGraceSeconds:      2,
+			ShutdownTimeoutSeconds: 180,
 		},
 		Routing: RoutingConfig{
 			FailureThreshold:           5,
@@ -127,9 +144,9 @@ func Default() Config {
 			TimeoutSeconds:       30,
 		},
 		Storage: StorageConfig{
-			Path:                  "data/gateway.db",
-			SecretPath:            "data/secret.key",
-			AdminPath:             "data/admin.token",
+			Path:                  storagePath,
+			SecretPath:            secretPath,
+			AdminPath:             adminPath,
 			LogRetentionDays:      30,
 			LogMaxEntries:         100000,
 			Timezone:              "Asia/Singapore",
@@ -143,7 +160,11 @@ func Default() Config {
 }
 
 func Load() (Config, error) {
-	cfg := Default()
+	mode, err := runtimeMode()
+	if err != nil {
+		return Config{}, err
+	}
+	cfg := defaultConfig(mode)
 	path := ConfigPath()
 	if b, err := os.ReadFile(path); err == nil {
 		decoder := yaml.NewDecoder(bytes.NewReader(b))
@@ -164,6 +185,12 @@ func Load() (Config, error) {
 	cfg.Storage.Path = getenv("GATEWAY_DB", cfg.Storage.Path)
 	cfg.Storage.SecretPath = getenv("GATEWAY_SECRET_PATH", cfg.Storage.SecretPath)
 	cfg.Storage.AdminPath = getenv("GATEWAY_ADMIN_TOKEN_FILE", cfg.Storage.AdminPath)
+	if dataDir := strings.TrimSpace(os.Getenv("GATEWAY_DATA_DIR")); dataDir != "" {
+		dataDir = filepath.Clean(dataDir)
+		cfg.Storage.Path = filepath.Join(dataDir, "gateway.db")
+		cfg.Storage.SecretPath = filepath.Join(dataDir, "secret.key")
+		cfg.Storage.AdminPath = filepath.Join(dataDir, "admin.token")
+	}
 	cfg.Storage.Timezone = getenv("GATEWAY_TIMEZONE", cfg.Storage.Timezone)
 	for _, item := range []struct {
 		key string
@@ -173,6 +200,8 @@ func Load() (Config, error) {
 		{"GATEWAY_READ_TIMEOUT_SECONDS", &cfg.Server.ReadTimeoutSeconds},
 		{"GATEWAY_IDLE_TIMEOUT_SECONDS", &cfg.Server.IdleTimeoutSeconds},
 		{"GATEWAY_MAX_HEADER_BYTES", &cfg.Server.MaxHeaderBytes},
+		{"GATEWAY_DRAIN_GRACE_SECONDS", &cfg.Server.DrainGraceSeconds},
+		{"GATEWAY_SHUTDOWN_TIMEOUT_SECONDS", &cfg.Server.ShutdownTimeoutSeconds},
 		{"GATEWAY_FAILURE_THRESHOLD", &cfg.Routing.FailureThreshold},
 		{"GATEWAY_COOLDOWN_SECONDS", &cfg.Routing.CooldownSeconds},
 		{"GATEWAY_AUTH_COOLDOWN_SECONDS", &cfg.Routing.AuthCooldownSeconds},
@@ -240,7 +269,65 @@ func Load() (Config, error) {
 }
 
 func ConfigPath() string {
-	return getenv("GATEWAY_CONFIG", "config.yaml")
+	if path := strings.TrimSpace(os.Getenv("GATEWAY_CONFIG")); path != "" {
+		return path
+	}
+	if runtimeModeOrPortable() == "installed" {
+		return filepath.Join(installedConfigDir(), "config.yaml")
+	}
+	return "config.yaml"
+}
+
+func runtimeMode() (string, error) {
+	mode := strings.ToLower(strings.TrimSpace(os.Getenv("GATEWAY_MODE")))
+	if mode == "" {
+		return "portable", nil
+	}
+	if mode != "portable" && mode != "installed" {
+		return "", fmt.Errorf("GATEWAY_MODE must be portable or installed")
+	}
+	return mode, nil
+}
+
+func runtimeModeOrPortable() string {
+	mode, err := runtimeMode()
+	if err != nil {
+		return "portable"
+	}
+	return mode
+}
+
+func installedDataDir() string {
+	if runtime.GOOS == "windows" {
+		if root := strings.TrimSpace(os.Getenv("LOCALAPPDATA")); root != "" {
+			return filepath.Join(root, "LocalAIGateway")
+		}
+	}
+	if root := strings.TrimSpace(os.Getenv("XDG_DATA_HOME")); root != "" {
+		return filepath.Join(root, "local-ai-gateway")
+	}
+	home, err := os.UserHomeDir()
+	if err == nil && home != "" {
+		if runtime.GOOS == "windows" {
+			return filepath.Join(home, "AppData", "Local", "LocalAIGateway")
+		}
+		return filepath.Join(home, ".local", "share", "local-ai-gateway")
+	}
+	return filepath.Join("data", "installed")
+}
+
+func installedConfigDir() string {
+	if runtime.GOOS == "windows" {
+		return installedDataDir()
+	}
+	if root := strings.TrimSpace(os.Getenv("XDG_CONFIG_HOME")); root != "" {
+		return filepath.Join(root, "local-ai-gateway")
+	}
+	home, err := os.UserHomeDir()
+	if err == nil && home != "" {
+		return filepath.Join(home, ".config", "local-ai-gateway")
+	}
+	return filepath.Join("config", "local-ai-gateway")
 }
 
 func SaveRouting(path string, routing RoutingConfig) error {
@@ -317,6 +404,12 @@ func (c Config) Validate() error {
 	}
 	if c.Server.MaxHeaderBytes < 1024 {
 		return fmt.Errorf("server.max_header_bytes must be >= 1024")
+	}
+	if c.Server.DrainGraceSeconds < 0 || c.Server.DrainGraceSeconds > 60 {
+		return fmt.Errorf("server.drain_grace_seconds must be between 0 and 60")
+	}
+	if c.Server.ShutdownTimeoutSeconds < 1 {
+		return fmt.Errorf("server.shutdown_timeout_seconds must be >= 1")
 	}
 	if c.Routing.FailureThreshold < 1 {
 		return fmt.Errorf("routing.failure_threshold must be >= 1")

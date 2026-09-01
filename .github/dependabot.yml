@@ -8,6 +8,11 @@ updates:
     directory: "/"
     schedule:
       interval: weekly
+    groups:
+      vue-runtime:
+        patterns:
+          - "vue"
+          - "@vue/*"
   - package-ecosystem: github-actions
     directory: "/"
     schedule:

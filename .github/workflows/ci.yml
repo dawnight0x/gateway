@@ -1,7 +1,9 @@
 name: CI
 
 on:
+  workflow_call:
   push:
+    branches: ["**"]
   pull_request:
 
 permissions:
@@ -37,6 +39,14 @@ jobs:
         env:
           CGO_ENABLED: "1"
         run: go test -race ./...
+      - if: runner.os == 'Linux'
+        run: go build -o bin/gateway-e2e ./cmd/gateway
+      - if: runner.os == 'Linux'
+        run: npx playwright install --with-deps chromium
+      - if: runner.os == 'Linux'
+        env:
+          GATEWAY_E2E_BINARY: ./bin/gateway-e2e
+        run: npm run test:e2e
       - if: runner.os == 'Windows'
         shell: pwsh
         run: ./scripts/smoke.ps1 -Port 8787

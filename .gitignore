@@ -12,5 +12,7 @@ bin/
 *.log
 coverage/
 coverage
+test-results/
+playwright-report/
 .DS_Store
 Thumbs.db

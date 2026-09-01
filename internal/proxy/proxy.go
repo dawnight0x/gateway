@@ -39,6 +39,7 @@ type Service struct {
 	limits *requestLimiter
 
 	inFlight         atomic.Int64
+	draining         atomic.Bool
 	upstreamAttempts atomic.Uint64
 	retryAttempts    atomic.Uint64
 	rejectedRequests atomic.Uint64
@@ -111,6 +112,14 @@ func (s *Service) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/v1/models/", s.proxy)
 }
 
+func (s *Service) BeginDrain() {
+	s.draining.Store(true)
+}
+
+func (s *Service) IsDraining() bool {
+	return s.draining.Load()
+}
+
 func (s *Service) proxy(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	requestID := requestID()
@@ -122,6 +131,12 @@ func (s *Service) proxy(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", http.MethodPost)
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
+		return
+	}
+	if s.draining.Load() {
+		s.rejectedRequests.Add(1)
+		w.Header().Set("Retry-After", strconv.Itoa(max(1, s.cfg.Server.DrainGraceSeconds)))
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": map[string]any{"message": "gateway is shutting down", "type": "gateway_draining"}})
 		return
 	}
 
@@ -603,7 +618,11 @@ func (s *Service) health(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"status": "unhealthy"})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
+	status := "ok"
+	if s.draining.Load() {
+		status = "draining"
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"status": status})
 }
 
 func (s *Service) ready(w http.ResponseWriter, r *http.Request) {
@@ -664,7 +683,11 @@ func (s *Service) readinessSnapshot(ctx context.Context) (readiness.Result, mode
 	if err != nil {
 		return readiness.Result{}, stats, false, err
 	}
-	return readiness.Evaluate(providers, keys, gatewayKeys, stats, s.cfg.Server.ProxyToken), stats, readiness.GatewayCredentialConfigured(gatewayKeys, s.cfg.Server.ProxyToken), nil
+	result := readiness.Evaluate(providers, keys, gatewayKeys, stats, s.cfg.Server.ProxyToken)
+	if s.draining.Load() {
+		result = readiness.Result{State: "draining", Reason: "shutdown_in_progress", Ready: false}
+	}
+	return result, stats, readiness.GatewayCredentialConfigured(gatewayKeys, s.cfg.Server.ProxyToken), nil
 }
 
 func (s *Service) metrics(w http.ResponseWriter, r *http.Request) {
@@ -692,6 +715,7 @@ func (s *Service) metrics(w http.ResponseWriter, r *http.Request) {
 		{"gateway_today_tokens", "gauge", uint64(stats.TodayTokens)},
 		{"gateway_request_logs_dropped_total", "counter", stats.DroppedRequestLogs},
 		{"gateway_in_flight_requests", "gauge", uint64(s.inFlight.Load())},
+		{"gateway_draining", "gauge", boolMetric(s.draining.Load())},
 		{"gateway_upstream_attempts_total", "counter", s.upstreamAttempts.Load()},
 		{"gateway_retry_attempts_total", "counter", s.retryAttempts.Load()},
 		{"gateway_rejected_requests_total", "counter", s.rejectedRequests.Load()},
@@ -716,6 +740,13 @@ func (s *Service) metrics(w http.ResponseWriter, r *http.Request) {
 	if _, err := w.Write([]byte(b.String())); err != nil {
 		slog.Warn("write metrics response failed", "error", err)
 	}
+}
+
+func boolMetric(value bool) uint64 {
+	if value {
+		return 1
+	}
+	return 0
 }
 
 func (s *Service) models(w http.ResponseWriter, r *http.Request) {

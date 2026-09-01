@@ -13,7 +13,7 @@ chmod +x gateway gateway-backup
 
 ## systemd
 
-将分发目录放到 `/opt/local-ai-gateway`，确保服务用户对该目录拥有读写权限，然后创建 `/etc/systemd/system/local-ai-gateway.service`：
+将只读分发目录放到 `/opt/local-ai-gateway`，把配置写入 `/etc/local-ai-gateway/config.yaml`，并让服务用户拥有 `/var/lib/local-ai-gateway` 的读写权限。程序目录本身不需要可写。然后创建 `/etc/systemd/system/local-ai-gateway.service`：
 
 ```ini
 [Unit]
@@ -28,10 +28,16 @@ Group=gateway
 WorkingDirectory=/opt/local-ai-gateway
 ExecStart=/opt/local-ai-gateway/gateway
 Environment=GATEWAY_TRAY=false
+Environment=GATEWAY_MODE=installed
+Environment=GATEWAY_CONFIG=/etc/local-ai-gateway/config.yaml
+Environment=GATEWAY_DATA_DIR=/var/lib/local-ai-gateway
 Restart=on-failure
 RestartSec=3
 NoNewPrivileges=true
 PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/local-ai-gateway
 
 [Install]
 WantedBy=multi-user.target

@@ -10,7 +10,11 @@ permissions:
   attestations: write
 
 jobs:
+  quality:
+    uses: ./.github/workflows/ci.yml
+
   metadata:
+    needs: quality
     runs-on: ubuntu-latest
     outputs:
       release_version: ${{ steps.release.outputs.release_version }}
@@ -18,20 +22,24 @@ jobs:
       windows_minor: ${{ steps.release.outputs.windows_minor }}
       windows_patch: ${{ steps.release.outputs.windows_patch }}
       package_name: ${{ steps.release.outputs.package_name }}
+      is_prerelease: ${{ steps.release.outputs.is_prerelease }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - id: release
         name: Validate release metadata
         shell: pwsh
         run: |
           $metadata = Get-Content -Raw release.json | ConvertFrom-Json
-          $versionMatch = [regex]::Match([string]$metadata.version, '^v?(?<major>0|[1-9][0-9]*)\.(?<minor>0|[1-9][0-9]*)\.(?<patch>0|[1-9][0-9]*)$')
-          $tagMatch = [regex]::Match("${{ github.ref_name }}", '^v?(?<major>0|[1-9][0-9]*)\.(?<minor>0|[1-9][0-9]*)\.(?<patch>0|[1-9][0-9]*)$')
+          $pattern = '^v?(?<major>0|[1-9][0-9]*)\.(?<minor>0|[1-9][0-9]*)\.(?<patch>0|[1-9][0-9]*)(?<prerelease>-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?$'
+          $versionMatch = [regex]::Match([string]$metadata.version, $pattern)
+          $tagMatch = [regex]::Match("${{ github.ref_name }}", $pattern)
           if (-not $versionMatch.Success -or -not $tagMatch.Success) {
             throw "release metadata and tag must use major.minor.patch format"
           }
-          $version = "$($versionMatch.Groups['major'].Value).$($versionMatch.Groups['minor'].Value).$($versionMatch.Groups['patch'].Value)"
-          $tagVersion = "$($tagMatch.Groups['major'].Value).$($tagMatch.Groups['minor'].Value).$($tagMatch.Groups['patch'].Value)"
+          $version = "$($versionMatch.Groups['major'].Value).$($versionMatch.Groups['minor'].Value).$($versionMatch.Groups['patch'].Value)$($versionMatch.Groups['prerelease'].Value)"
+          $tagVersion = "$($tagMatch.Groups['major'].Value).$($tagMatch.Groups['minor'].Value).$($tagMatch.Groups['patch'].Value)$($tagMatch.Groups['prerelease'].Value)"
           if ($version -ne $tagVersion) {
             throw "release tag $tagVersion does not match release metadata version $version"
           }
@@ -44,6 +52,7 @@ jobs:
           "windows_minor=$($versionMatch.Groups['minor'].Value)" >> $env:GITHUB_OUTPUT
           "windows_patch=$($versionMatch.Groups['patch'].Value)" >> $env:GITHUB_OUTPUT
           "package_name=$packageName" >> $env:GITHUB_OUTPUT
+          "is_prerelease=$($versionMatch.Groups['prerelease'].Success.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
 
   build:
     needs: metadata
@@ -99,7 +108,7 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: "0"
         run: |
-          $name = "$env:PACKAGE_NAME-${{ matrix.package_platform }}"
+          $name = "$env:PACKAGE_NAME-$env:RELEASE_VERSION-${{ matrix.package_platform }}"
           New-Item -ItemType Directory -Force "stage/$name" | Out-Null
           $builtAt = [DateTime]::UtcNow.ToString("o")
           $ld = "-s -w " +
@@ -136,7 +145,7 @@ jobs:
             stage/*.tar.gz
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.PACKAGE_NAME }}-${{ matrix.package_platform }}
+          name: ${{ env.PACKAGE_NAME }}-${{ env.RELEASE_VERSION }}-${{ matrix.package_platform }}
           path: |
             stage/*.zip
             stage/*.tar.gz
@@ -147,23 +156,39 @@ jobs:
     runs-on: ubuntu-latest
     env:
       PACKAGE_NAME: ${{ needs.metadata.outputs.package_name }}
+      RELEASE_VERSION: ${{ needs.metadata.outputs.release_version }}
+      IS_PRERELEASE: ${{ needs.metadata.outputs.is_prerelease }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          pattern: ${{ env.PACKAGE_NAME }}-*
+          pattern: ${{ env.PACKAGE_NAME }}-${{ env.RELEASE_VERSION }}-*
           path: release
           merge-multiple: true
       - name: Create checksums
         shell: pwsh
         run: |
-          Get-ChildItem release -File | Where-Object { $_.Name -match '\.(zip|tar\.gz)$' } | Sort-Object Name | ForEach-Object {
+          $archives = @(Get-ChildItem release -File | Where-Object { $_.Name -match '\.(zip|tar\.gz)$' } | Sort-Object Name)
+          if ($archives.Count -lt 3) {
+            throw "expected at least three platform archives, found $($archives.Count)"
+          }
+          $archives | ForEach-Object {
             $hash = (Get-FileHash -Algorithm SHA256 $_.FullName).Hash.ToLowerInvariant()
             "$hash  $($_.Name)"
           } | Set-Content -Encoding ascii release/SHA256SUMS
       - uses: actions/attest-build-provenance@v3
         with:
           subject-path: release/SHA256SUMS
-      - env:
+      - shell: pwsh
+        env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "${{ github.ref_name }}" release/* --generate-notes --verify-tag
+        run: |
+          $assets = @(Get-ChildItem release -File | Sort-Object Name | ForEach-Object FullName)
+          $arguments = @('release', 'create', '${{ github.ref_name }}') + $assets + @('--generate-notes', '--verify-tag')
+          if ($env:IS_PRERELEASE -eq 'true') {
+            $arguments += '--prerelease'
+          }
+          & gh @arguments
+          if ($LASTEXITCODE -ne 0) {
+            throw "GitHub release creation failed with exit code $LASTEXITCODE"
+          }

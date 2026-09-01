@@ -70,6 +70,7 @@ function createHarness({ hash = '', fetchImpl = async () => response({}) } = {})
       },
     }),
     computed: (getter) => ({ get value() { return getter(); } }),
+    nextTick: async (callback) => { if (callback) callback(); },
     onMounted: (callback) => mounted.push(callback),
     onUnmounted: (callback) => unmounted.push(callback),
     reactive: (value) => value,
@@ -592,4 +593,13 @@ test('database and portable backup actions download files and clear passphrases'
   assert.deepEqual(harness.downloads.map((item) => item.download), ['gateway-backup.db', 'gateway-portable-backup.zip']);
   assert.equal(harness.exposed.backupPassphrase.value, '');
   assert.equal(harness.exposed.backupPassphraseConfirm.value, '');
+});
+
+test('inline editors and confirmation dialog expose labels and keyboard semantics', () => {
+  assert.match(templateSource, /<label class="form-field"><span>\{\{ t\('field\.providerName'\) \}\}<\/span><input/);
+  assert.match(templateSource, /aria-labelledby="confirm-dialog-title"/);
+  assert.match(templateSource, /aria-describedby="confirm-dialog-message"/);
+  assert.match(templateSource, /@keydown="handleConfirmDialogKeydown"/);
+  assert.match(appSource, /event\.key === 'Escape'/);
+  assert.match(appSource, /confirmDialogReturnFocus/);
 });

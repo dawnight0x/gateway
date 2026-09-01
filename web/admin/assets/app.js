@@ -1,4 +1,4 @@
-const { createApp, computed, onMounted, onUnmounted, reactive, ref } = Vue;
+const { createApp, computed, nextTick, onMounted, onUnmounted, reactive, ref } = Vue;
 
 const messages = window.gatewayMessages;
 
@@ -80,6 +80,8 @@ createApp({
     const authForm = reactive({ token: '' });
     const notices = ref([]);
     const confirmDialog = reactive({ open: false, title: '', message: '', requiredId: '', typedId: '', destructive: false, resolve: null });
+    const confirmDialogElement = ref(null);
+    let confirmDialogReturnFocus = null;
     if (bootAdminToken) {
       sessionStorage.setItem('gateway.adminToken', bootAdminToken);
       clearAdminTokenHash();
@@ -184,6 +186,7 @@ createApp({
     };
 
     const openConfirmDialog = (message, title = t('confirm.title'), requiredId = '') => new Promise((resolve) => {
+      confirmDialogReturnFocus = typeof document.activeElement?.focus === 'function' ? document.activeElement : null;
       Object.assign(confirmDialog, {
         open: true,
         title,
@@ -193,6 +196,10 @@ createApp({
         destructive: !!requiredId,
         resolve,
       });
+      nextTick(() => {
+        const target = confirmDialogElement.value?.querySelector('[autofocus], button:not([disabled]), input:not([disabled])');
+        target?.focus();
+      });
     });
 
     const finishConfirmDialog = (accepted) => {
@@ -200,6 +207,31 @@ createApp({
       const matches = !confirmDialog.requiredId || confirmDialog.typedId === confirmDialog.requiredId;
       Object.assign(confirmDialog, { open: false, requiredId: '', typedId: '', resolve: null });
       if (resolve) resolve(!!accepted && matches);
+      const returnFocus = confirmDialogReturnFocus;
+      confirmDialogReturnFocus = null;
+      nextTick(() => returnFocus?.focus());
+    };
+
+    const handleConfirmDialogKeydown = (event) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        finishConfirmDialog(false);
+        return;
+      }
+      if (event.key !== 'Tab') return;
+      const focusable = Array.from(confirmDialogElement.value?.querySelectorAll(
+        'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex="-1"])',
+      ) || []).filter((element) => !element.hidden);
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
     };
 
     const dismissNotice = (id) => {
@@ -1574,8 +1606,10 @@ createApp({
       exportLogs,
       clearLogs,
       confirmDialog,
+      confirmDialogElement,
       dismissNotice,
       finishConfirmDialog,
+      handleConfirmDialogKeydown,
       logoutAdmin,
       metricCards,
       navItems,

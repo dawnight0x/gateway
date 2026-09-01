@@ -13,7 +13,7 @@ Local AI Gateway 是一个面向本地开发环境的多上游 AI 网关。编�
 - 提供并发限制、冷却恢复、请求超时和避免重复计费的安全重试策略。
 - 内嵌中英文管理后台，支持 Provider、Key、逻辑模型、日志和运行状态管理。
 - 使用 SQLite 保存本地数据，并加密存储上游 Key；支持便携备份与恢复。
-- Windows 提供系统托盘和单实例保护，同时支持 Linux 与 macOS 运行。
+- Windows 提供系统托盘和单实例保护，同时支持 Linux amd64/arm64 运行。
 
 详细协议边界见[协议兼容矩阵](docs/protocol-compatibility.md)。
 
@@ -86,6 +86,7 @@ Copy-Item config.example.yaml config.yaml
 - [Linux 部署](docs/linux.md)
 - [协议兼容矩阵](docs/protocol-compatibility.md)
 - [发行包使用说明](docs/README-distribution.md)
+- [升级与回滚](docs/upgrade.md)
 - [参与开发与测试](CONTRIBUTING.md)
 
 ## 参与贡献
@@ -99,3 +100,5 @@ Copy-Item config.example.yaml config.yaml
 ## License
 
 本项目基于 [MIT License](LICENSE) 授权。
+
+安全问题请按 [SECURITY.md](SECURITY.md) 中的方式私下报告。

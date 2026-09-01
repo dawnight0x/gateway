@@ -189,6 +189,35 @@ func TestLoadRejectsInvalidEnvironmentValues(t *testing.T) {
 	}
 }
 
+func TestLoadRejectsInvalidRuntimeMode(t *testing.T) {
+	t.Setenv("GATEWAY_MODE", "server")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "GATEWAY_MODE") {
+		t.Fatalf("expected invalid runtime mode error, got %v", err)
+	}
+}
+
+func TestInstalledModeUsesExplicitDataDirectory(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config", "config.yaml")
+	t.Setenv("GATEWAY_MODE", "installed")
+	t.Setenv("GATEWAY_DATA_DIR", filepath.Join(dir, "state"))
+	t.Setenv("GATEWAY_CONFIG", configPath)
+	t.Setenv("GATEWAY_ADMIN_TOKEN", "explicit-admin-token")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Storage.Path != filepath.Join(dir, "state", "gateway.db") ||
+		cfg.Storage.SecretPath != filepath.Join(dir, "state", "secret.key") ||
+		cfg.Storage.AdminPath != filepath.Join(dir, "state", "admin.token") {
+		t.Fatalf("installed storage paths = %#v", cfg.Storage)
+	}
+	if ConfigPath() != configPath {
+		t.Fatalf("installed config path = %q", ConfigPath())
+	}
+}
+
 func TestExampleConfigLoads(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("GATEWAY_CONFIG", filepath.Join("..", "..", "config.example.yaml"))

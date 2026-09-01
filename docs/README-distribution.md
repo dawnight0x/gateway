@@ -39,12 +39,18 @@ chmod +x gateway gateway-backup
 - Anthropic Base URL：`http://localhost:18787`
 - Gemini Base URL：`http://localhost:18787`
 
-首次启动会在程序所在目录创建 `data` 文件夹。后台管理员 Token 保存在 `data/admin.token`，在管理后台登录时使用该 Token。
+发行包默认以便携模式运行，首次启动会在程序所在目录创建 `data` 文件夹。后台管理员 Token 保存在 `data/admin.token`，在管理后台登录时使用该 Token。
 
 登录后先添加 Provider 和上游 Key，等待模型列表自动同步；需要统一模型入口时，在“模型优先路由”页面配置逻辑模型及备用顺序。最后在“网关 Key”页面创建供客户端使用的 `sk-...` Key。真实上游 Key 只保存在本机网关中。
 
 ## 数据与升级
 
-数据库、加密密钥、管理员 Token 和日志均保存在 `data` 文件夹。升级程序前请先停止网关并备份该文件夹，然后用新版执行程序替换旧版；不要删除或覆盖原有 `data` 文件夹。
+数据库、加密密钥、管理员 Token 和日志均保存在 `data` 文件夹。升级程序前请先停止网关并备份该文件夹，然后用新版执行程序替换旧版；不要删除或覆盖原有 `data` 文件夹。完整步骤见 `docs/upgrade.md`。
+
+## 安装模式
+
+由安装器或服务管理器运行时设置 `GATEWAY_MODE=installed`。Windows 安装模式默认把配置与数据保存到 `%LOCALAPPDATA%\LocalAIGateway`。也可以用 `GATEWAY_CONFIG` 指定配置文件，并用 `GATEWAY_DATA_DIR` 统一指定数据库、主密钥和管理员 Token 所在目录。
+
+便携模式是兼容旧版本的默认行为。程序不会在没有明确配置时自动搬迁现有 `data`，避免升级时误用空数据库。
 
 默认仅监听 `127.0.0.1`，不会直接开放到局域网或公网。

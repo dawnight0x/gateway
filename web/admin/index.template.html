@@ -309,21 +309,21 @@
                   <small>{{ p.name }} · {{ p.baseUrl }}</small>
                 </div>
                 <div v-if="formError" class="form-error">{{ formError }}</div>
-                <input v-model.trim="providerForm.id" disabled :placeholder="t('placeholder.providerId')">
-                <input v-model.trim="providerForm.name" :placeholder="t('placeholder.name')">
-                <select v-model="providerForm.type">
+                <label class="form-field"><span>{{ t('field.providerId') }}</span><input v-model.trim="providerForm.id" disabled :placeholder="t('placeholder.providerId')"></label>
+                <label class="form-field"><span>{{ t('field.providerName') }}</span><input v-model.trim="providerForm.name" :placeholder="t('placeholder.name')"></label>
+                <label class="form-field"><span>{{ t('field.providerType') }}</span><select v-model="providerForm.type">
                   <option v-for="type in providerTypes" :key="type.value" :value="type.value">{{ type.label }}</option>
-                </select>
-                <input v-model.trim="providerForm.baseUrl" :placeholder="t('placeholder.baseUrl')">
-                <input v-model.trim="providerForm.balancePath" :placeholder="t('placeholder.balancePath')">
-                <input v-model.number="providerForm.priority" type="number" min="0" max="1000" :placeholder="t('placeholder.priority')">
-                <div class="model-select-field">
+                </select></label>
+                <label class="form-field"><span>{{ t('field.baseUrl') }}</span><input v-model.trim="providerForm.baseUrl" :placeholder="t('placeholder.baseUrl')"></label>
+                <label class="form-field"><span>{{ t('field.balancePath') }}</span><input v-model.trim="providerForm.balancePath" :placeholder="t('placeholder.balancePath')"></label>
+                <label class="form-field"><span>{{ t('field.providerPriority') }}</span><input v-model.number="providerForm.priority" type="number" min="0" max="1000" :placeholder="t('placeholder.priority')"></label>
+                <label class="model-select-field form-field"><span>{{ t('field.defaultModel') }}</span>
                   <select v-model="providerForm.defaultModel">
                     <option value="">{{ t('model.useRequestDefault') }}</option>
                     <option v-for="model in providerModelOptions(providerForm.id || providerForm.editingId)" :key="model" :value="model">{{ model }}</option>
                   </select>
                   <small>{{ t('model.providerHint') }}</small>
-                </div>
+                </label>
                 <details class="advanced-field">
                   <summary>{{ t('provider.modelMapTitle') }}</summary>
                   <p>{{ t('provider.modelMapCopy') }}</p>
@@ -422,19 +422,19 @@
                       <small class="key-edit-context" :title="k.id">{{ p.name }} · {{ t('table.internalId') }}: {{ k.id }}</small>
                     </div>
                     <div v-if="formError" class="form-error">{{ formError }}</div>
-                    <select v-model="keyForm.providerId" disabled>
+                    <label class="form-field"><span>{{ t('table.provider') }}</span><select v-model="keyForm.providerId" disabled>
                       <option v-for="provider in providers" :key="provider.id" :value="provider.id">{{ provider.name }} ({{ provider.id }})</option>
-                    </select>
-                    <input v-model.trim="keyForm.name" :placeholder="t('placeholder.keyDisplayName')">
-                    <input v-model.trim="keyForm.secret" type="password" :placeholder="t('placeholder.secretKeep')" autocomplete="off">
-                    <input v-model.number="keyForm.priority" type="number" min="0" max="1000" :placeholder="t('placeholder.priority')">
-                    <div class="model-select-field">
+                    </select></label>
+                    <label class="form-field"><span>{{ t('field.keyName') }}</span><input v-model.trim="keyForm.name" :placeholder="t('placeholder.keyDisplayName')"></label>
+                    <label class="form-field"><span>{{ t('field.keySecret') }}</span><input v-model.trim="keyForm.secret" type="password" :placeholder="t('placeholder.secretKeep')" autocomplete="off"></label>
+                    <label class="form-field"><span>{{ t('field.keyPriority') }}</span><input v-model.number="keyForm.priority" type="number" min="0" max="1000" :placeholder="t('placeholder.priority')"></label>
+                    <label class="model-select-field form-field"><span>{{ t('field.defaultModel') }}</span>
                       <select v-model="keyForm.defaultModel">
                         <option value="">{{ t('model.useRequestDefault') }}</option>
                         <option v-for="model in providerModelOptions(keyForm.providerId)" :key="model" :value="model" :class="{ 'flagship-option': isFlagshipModel(model) }">{{ modelOptionLabel(model) }}</option>
                       </select>
                       <small>{{ t('model.keyHint') }}</small>
-                    </div>
+                    </label>
                     <label class="check"><input v-model="keyForm.enabled" type="checkbox"> {{ t('status.enabled') }}</label>
                     <section class="model-inventory key-model-management">
                       <div class="model-inventory-head">
@@ -921,11 +921,11 @@
     </main>
 
     <div v-if="confirmDialog.open" class="modal-overlay" @click.self="finishConfirmDialog(false)">
-      <form class="confirm-dialog" role="dialog" aria-modal="true" @submit.prevent="finishConfirmDialog(true)">
+      <form ref="confirmDialogElement" class="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="confirm-dialog-title" aria-describedby="confirm-dialog-message" @keydown="handleConfirmDialogKeydown" @submit.prevent="finishConfirmDialog(true)">
         <div>
           <p class="eyebrow">Local AI Gateway</p>
-          <h2>{{ confirmDialog.title }}</h2>
-          <p>{{ confirmDialog.message }}</p>
+          <h2 id="confirm-dialog-title">{{ confirmDialog.title }}</h2>
+          <p id="confirm-dialog-message">{{ confirmDialog.message }}</p>
         </div>
         <label v-if="confirmDialog.requiredId">
           <span>{{ t('confirm.typeId', { id: confirmDialog.requiredId }) }}</span>

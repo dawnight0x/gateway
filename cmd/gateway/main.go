@@ -152,7 +152,11 @@ func run() (runErr error) {
 	var shutdownErr error
 	shutdown := func() error {
 		once.Do(func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			px.BeginDrain()
+			if grace := time.Duration(cfg.Server.DrainGraceSeconds) * time.Second; grace > 0 {
+				time.Sleep(grace)
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), time.Duration(cfg.Server.ShutdownTimeoutSeconds)*time.Second)
 			defer cancel()
 			shutdownErr = server.Shutdown(ctx)
 		})

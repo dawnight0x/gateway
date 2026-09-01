@@ -3,10 +3,12 @@
   "private": true,
   "scripts": {
     "build:admin": "node scripts/build-admin.mjs",
-    "test:admin": "node --test scripts/admin-app.test.mjs"
+    "test:admin": "node --test scripts/admin-app.test.mjs",
+    "test:e2e": "playwright test"
   },
   "devDependencies": {
-    "@vue/compiler-dom": "3.5.22",
-    "vue": "3.5.22"
+    "@playwright/test": "1.62.1",
+    "@vue/compiler-dom": "3.5.42",
+    "vue": "3.5.42"
   }
 }
