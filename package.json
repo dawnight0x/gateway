@@ -6,7 +6,7 @@
     "test:admin": "node --test scripts/admin-app.test.mjs"
   },
   "devDependencies": {
-    "@vue/compiler-dom": "3.5.22",
+    "@vue/compiler-dom": "3.5.42",
     "vue": "3.5.22"
   }
 }
