@@ -138,7 +138,7 @@ jobs:
               throw "tar archive creation failed with exit code $LASTEXITCODE"
             }
           }
-      - uses: actions/attest-build-provenance@v3
+      - uses: actions/attest-build-provenance@v4
         with:
           subject-path: |
             stage/*.zip
@@ -176,7 +176,7 @@ jobs:
             $hash = (Get-FileHash -Algorithm SHA256 $_.FullName).Hash.ToLowerInvariant()
             "$hash  $($_.Name)"
           } | Set-Content -Encoding ascii release/SHA256SUMS
-      - uses: actions/attest-build-provenance@v3
+      - uses: actions/attest-build-provenance@v4
         with:
           subject-path: release/SHA256SUMS
       - shell: pwsh
