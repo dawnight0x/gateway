@@ -59,14 +59,23 @@ try {
   $sha256.Dispose()
 }
 
-Copy-Item -LiteralPath (Join-Path $Root "docs\README-distribution.md") -Destination (Join-Path $Destination "README.md")
+# docs/ is no longer tracked in the repository; package it only when present
+# locally so CI checkouts without docs/ can still stage a complete package.
+$readmeDistribution = Join-Path $Root "docs\README-distribution.md"
+if (Test-Path -LiteralPath $readmeDistribution) {
+  Copy-Item -LiteralPath $readmeDistribution -Destination (Join-Path $Destination "README.md")
+}
 Copy-Item -LiteralPath (Join-Path $Root "config.example.yaml") -Destination (Join-Path $Destination "config.example.yaml")
 Copy-Item -LiteralPath (Join-Path $Root "CHANGELOG.md") -Destination (Join-Path $Destination "CHANGELOG.md")
 Copy-Item -LiteralPath (Join-Path $Root "SECURITY.md") -Destination (Join-Path $Destination "SECURITY.md")
 $docsDestination = Join-Path $Destination "docs"
-New-Item -ItemType Directory -Force -Path $docsDestination | Out-Null
-foreach ($doc in @("linux.md", "operations.md", "protocol-compatibility.md", "upgrade.md")) {
-  Copy-Item -LiteralPath (Join-Path $Root "docs\$doc") -Destination (Join-Path $docsDestination $doc)
+$docSources = @("linux.md", "operations.md", "protocol-compatibility.md", "upgrade.md") |
+  ForEach-Object { Join-Path $Root "docs\$_" } | Where-Object { Test-Path -LiteralPath $_ }
+if ($docSources.Count -gt 0) {
+  New-Item -ItemType Directory -Force -Path $docsDestination | Out-Null
+  foreach ($docSource in $docSources) {
+    Copy-Item -LiteralPath $docSource -Destination (Join-Path $docsDestination (Split-Path -Leaf $docSource))
+  }
 }
 
 & (Join-Path $Root "scripts\generate-sbom.ps1") `

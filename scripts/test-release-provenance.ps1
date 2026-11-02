@@ -28,9 +28,12 @@ try {
     "docs/README-distribution.md", "docs/linux.md", "docs/operations.md", "docs/protocol-compatibility.md", "docs/upgrade.md",
     "config.example.yaml", "CHANGELOG.md", "SECURITY.md", "package-lock.json"
   )) {
+    $source = Join-Path $root $relative
+    # docs/ is untracked now; skip fixture copies that CI checkouts do not have.
+    if (-not (Test-Path -LiteralPath $source)) { continue }
     $destination = Join-Path $fixture $relative
     New-Item -ItemType Directory -Force -Path (Split-Path -Parent $destination) | Out-Null
-    Copy-Item -LiteralPath (Join-Path $root $relative) -Destination $destination
+    Copy-Item -LiteralPath $source -Destination $destination
   }
   Write-Fixture "go.mod" "module example.test/release-probe`ngo 1.25.0`n"
   Write-Fixture ".gitignore" "data/`n"

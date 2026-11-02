@@ -16,3 +16,32 @@ test-results/
 playwright-report/
 .DS_Store
 Thumbs.db
+
+# Local-only tests, docs and agent instructions
+tests/
+docs/
+agent.md
+
+# Local config variants
+config.*.yaml
+*.local.yaml
+
+# Certificates and key material
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+
+# Databases
+*.db
+*.sqlite
+
+# Build artifacts and archives
+*.exe
+*.zip
+*.tar.gz
+
+# Editor settings
+.vscode/
+.idea/
