@@ -3,6 +3,7 @@ package upstreamhttp
 import (
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -32,6 +33,24 @@ func TestClientBlocksCrossOriginRedirectWithoutLeakingCustomKey(t *testing.T) {
 	}
 	if leaked.Load() {
 		t.Fatal("custom API key reached cross-origin redirect target")
+	}
+}
+
+func TestClientBoundsSameOriginRedirects(t *testing.T) {
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		hop, _ := strconv.Atoi(strings.TrimPrefix(r.URL.Path, "/"))
+		http.Redirect(w, r, "/"+strconv.Itoa(hop+1), http.StatusTemporaryRedirect)
+	}))
+	defer server.Close()
+	// No total client timeout: the redirect policy itself must bound the loop.
+	_, err := New(time.Second, 0, 4).Get(server.URL + "/0")
+	if err == nil || !strings.Contains(err.Error(), "10 upstream redirects") {
+		t.Fatalf("redirect error = %v", err)
+	}
+	if got := requests.Load(); got != 10 {
+		t.Fatalf("requests = %d, want 10", got)
 	}
 }
 

@@ -22,6 +22,9 @@ type StreamState struct {
 	ContentOpen          bool
 	FinishSent           bool
 	Finished             bool
+	UpstreamFinished     bool
+	ExpectedChoices      int
+	FinishReason         string
 	Sequence             int
 	Text                 strings.Builder
 	Reasoning            strings.Builder
@@ -38,6 +41,7 @@ type StreamState struct {
 	aggregateBytes       int
 	ResourceIDs          []string
 	UpstreamError        error
+	chatChoices          map[int]bool
 }
 
 type upstreamStreamError struct {
@@ -89,6 +93,7 @@ type normalizedStreamEvent struct {
 	Usage       Usage
 	Done        bool
 	ResourceIDs []string
+	ChatChoices map[int]bool
 }
 
 func EnableStreaming(req ConvertedRequest, upstream string) (ConvertedRequest, error) {
@@ -213,7 +218,10 @@ func ConvertStreamEvent(event string, data []byte, inbound, upstream string, sta
 
 func normalizeStreamEvent(event string, data []byte, upstream string) (normalizedStreamEvent, error) {
 	if strings.TrimSpace(string(data)) == "[DONE]" {
-		return normalizedStreamEvent{Done: true}, nil
+		// Only Chat uses this terminal marker. Other protocols have their own
+		// terminal events; an arbitrary [DONE] must not turn a partial response
+		// into a successful result.
+		return normalizedStreamEvent{Done: upstream == router.ProtocolOpenAI}, nil
 	}
 	var raw map[string]any
 	if err := json.Unmarshal(data, &raw); err != nil {
@@ -225,6 +233,11 @@ func normalizeStreamEvent(event string, data []byte, upstream string) (normalize
 			return normalizedStreamEvent{}, newUpstreamStreamError("openai", streamErrorMessage(raw))
 		}
 		choice := firstMap(raw["choices"])
+		chatChoices := make(map[int]bool)
+		for index, value := range slice(raw["choices"]) {
+			item := asMap(value)
+			chatChoices[intOr(item["index"], index)] = strings.TrimSpace(stringField(item, "finish_reason")) != ""
+		}
 		delta := asMap(choice["delta"])
 		text := contentText(delta["content"])
 		if text == "" {
@@ -241,13 +254,14 @@ func normalizeStreamEvent(event string, data []byte, upstream string) (normalize
 			toolCalls = append(toolCalls, normalizedToolCall{Index: 0, Name: stringField(legacy, "name"), Arguments: stringField(legacy, "arguments")})
 		}
 		return normalizedStreamEvent{
-			ID:        stringField(raw, "id"),
-			Model:     stringField(raw, "model"),
-			Text:      text,
-			Reasoning: stringOr(delta["reasoning_content"], stringField(delta, "reasoning")),
-			ToolCalls: toolCalls,
-			Finish:    stringField(choice, "finish_reason"),
-			Usage:     ExtractUsage(data),
+			ID:          stringField(raw, "id"),
+			Model:       stringField(raw, "model"),
+			Text:        text,
+			Reasoning:   stringOr(delta["reasoning_content"], stringField(delta, "reasoning")),
+			ToolCalls:   toolCalls,
+			Finish:      stringField(choice, "finish_reason"),
+			Usage:       ExtractUsage(data),
+			ChatChoices: chatChoices,
 		}, nil
 	case router.ProtocolOpenAIResponses:
 		typeName := stringField(raw, "type")
@@ -375,6 +389,27 @@ func streamErrorMessage(raw map[string]any) string {
 }
 
 func updateStreamState(state *StreamState, event normalizedStreamEvent) error {
+	if event.Finish != "" {
+		state.FinishReason = event.Finish
+	}
+	if len(event.ChatChoices) > 0 {
+		if state.chatChoices == nil {
+			state.chatChoices = make(map[int]bool)
+		}
+		for index, finished := range event.ChatChoices {
+			if _, exists := state.chatChoices[index]; !exists && len(state.chatChoices) >= 1024 {
+				return fmt.Errorf("upstream stream exceeds 1024 choices limit")
+			}
+			state.chatChoices[index] = finished
+		}
+		state.UpstreamFinished = len(state.chatChoices) >= max(1, state.ExpectedChoices)
+		for _, finished := range state.chatChoices {
+			state.UpstreamFinished = state.UpstreamFinished && finished
+		}
+	}
+	if event.Done {
+		state.UpstreamFinished = true
+	}
 	if event.ID != "" {
 		state.ID = event.ID
 	}
@@ -404,6 +439,27 @@ func updateStreamState(state *StreamState, event normalizedStreamEvent) error {
 	}
 	mergeUsage(&state.Usage, event.Usage)
 	return nil
+}
+
+// FinalizeStream renders a missing output terminator only after the upstream
+// protocol has explicitly completed. EOF alone is never a completion signal.
+func FinalizeStream(inbound string, state *StreamState) ([]StreamFrame, error) {
+	if !state.UpstreamFinished {
+		return nil, fmt.Errorf("upstream stream ended without a terminal event")
+	}
+	event := normalizedStreamEvent{Done: true}
+	switch inbound {
+	case router.ProtocolOpenAI:
+		return renderOpenAIStream(event, state)
+	case router.ProtocolOpenAIResponses:
+		return renderResponsesStream(event, state)
+	case router.ProtocolAnthropic:
+		return renderAnthropicStream(event, state)
+	case router.ProtocolGemini:
+		return renderGeminiStream(event, state)
+	default:
+		return nil, fmt.Errorf("unsupported inbound stream protocol %q", inbound)
+	}
 }
 
 func responseResourceIDsMap(raw map[string]any) []string {
@@ -745,7 +801,14 @@ func renderResponsesStream(event normalizedStreamEvent, state *StreamState) ([]S
 		frames = append(frames, finishResponsesOutput(state, itemID)...)
 	}
 	if event.Done && !state.Finished {
-		frames = append(frames, responsesFrame(state, "response.completed", map[string]any{"response": responsesObject(state, responseID, itemID, "completed", true)}))
+		typeName, status := "response.completed", "completed"
+		response := responsesObject(state, responseID, itemID, status, true)
+		if openAIFinishReason(state.FinishReason) == "length" {
+			typeName, status = "response.incomplete", "incomplete"
+			response["status"] = status
+			response["incomplete_details"] = map[string]any{"reason": "max_output_tokens"}
+		}
+		frames = append(frames, responsesFrame(state, typeName, map[string]any{"response": response}))
 		state.Finished = true
 	}
 	return frames, nil

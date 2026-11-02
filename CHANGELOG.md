@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Pinned Go 1.26.10 (previously 1.26.9) and updated source-map-js to 1.2.2; added weekly Go/npm security scans.
+- Detect truncated streams without fabricating successful completion, preserve length-limited Responses semantics, and bound streaming JSON/error-body reads.
+- Require an exclusive gateway lock for offline restore/key rotation; bound same-origin redirect chains and synchronize admin configuration snapshots.
+- Record actual working-tree source hashes and the embedded Vue runtime in packages; align local packaging with all three release platforms.
+- Add regression coverage for stream completion, timeouts, maintenance locking, configuration concurrency, and release provenance.
+
 ## 1.0.0
 
 - Unified release metadata and versioned artifact names.

@@ -24,7 +24,9 @@
 
 ## 本地开发
 
-后端需要 Go 1.25 或更高版本。`go.mod` 指定 Go 1.26.6 工具链。
+后端需要 Go 1.25 或更高版本。`go.mod` 指定 Go 1.26.10 工具链；测试和发行构建请设置 `GOTOOLCHAIN=go1.26.10`，避免本机较新的 Go 覆盖指定版本。
+
+`scripts/package-beta.ps1` 固定使用 `go.mod` 的工具链并构建 Windows amd64、Linux amd64/arm64。默认要求干净工作区；`-AllowDirty` 仅用于本地验证，会标记 `commit` 为 `-dirty`。`SOURCE-MANIFEST.txt` 按实际工作区文件内容计算（含新增源码，不含已删除文件、忽略的数据和本地 agent 指令），`VERSION.json` 的 `sourceMode` / `sourceDirty` 明确来源；换行不同可能导致跨平台源码摘要不同。不要把未提交的构建包当成已发布标签对应的正式制品。
 
 运行后端：
 

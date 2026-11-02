@@ -8,11 +8,88 @@ import (
 	"strings"
 	"testing"
 
+	"local-ai-gateway/internal/desktop"
 	"local-ai-gateway/internal/model"
 	"local-ai-gateway/internal/store"
 )
 
 const backupTestPassphrase = "correct horse battery staple"
+
+func TestOfflineMaintenanceRefusesGatewayLockWithoutChangingData(t *testing.T) {
+	for _, command := range []string{"restore", "rotate-key"} {
+		t.Run(command, func(t *testing.T) {
+			dir := t.TempDir()
+			database, secret := filepath.Join(dir, "gateway.db"), filepath.Join(dir, "secret.key")
+			st := createBackupTestStore(t, database, secret)
+			defer st.Close()
+			lock, exists, err := desktop.AcquireLock(desktop.LockPath(database), false)
+			if err != nil || exists {
+				t.Fatalf("acquire gateway lock: exists=%v err=%v", exists, err)
+			}
+			defer lock.Release()
+			beforeDB, _ := os.ReadFile(database)
+			beforeKey, _ := os.ReadFile(secret)
+			beforeLock, _ := os.ReadFile(desktop.LockPath(database))
+			t.Setenv("GATEWAY_BACKUP_PASSPHRASE", backupTestPassphrase)
+			args := []string{command, "--database", database, "--secret", secret}
+			if command == "restore" {
+				args = append(args, "--input", filepath.Join(dir, "missing-backup.zip"), "--force")
+			}
+			if err := run(args); err == nil || !strings.Contains(err.Error(), "stop gateway") {
+				t.Fatalf("maintenance must refuse a live lock before touching storage: %v", err)
+			}
+			for path, before := range map[string][]byte{database: beforeDB, secret: beforeKey, desktop.LockPath(database): beforeLock} {
+				after, err := os.ReadFile(path)
+				if err != nil || !bytes.Equal(before, after) {
+					t.Fatalf("locked file changed: %s (%v)", path, err)
+				}
+			}
+			keys, err := st.ListKeys(context.Background())
+			if err != nil || len(keys) != 1 || keys[0].Secret != "sk-backup-test" {
+				t.Fatalf("running gateway secrets changed: keys=%v err=%v", keys, err)
+			}
+		})
+	}
+}
+
+func TestMaintenanceDoesNotStealUnverifiedStaleLock(t *testing.T) {
+	database := filepath.Join(t.TempDir(), "gateway.db")
+	path := desktop.LockPath(database)
+	// A partial lock may be from a process currently starting, not a crash.
+	if err := os.WriteFile(path, []byte("pid="), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := acquireMaintenanceLock(database); err == nil {
+		t.Fatal("maintenance stole an unverified lock")
+	}
+	data, err := os.ReadFile(path)
+	if err != nil || string(data) != "pid=" {
+		t.Fatalf("existing lock changed: %q, %v", data, err)
+	}
+}
+
+func TestMaintenanceReleasesLockOnErrors(t *testing.T) {
+	for _, command := range []string{"restore", "rotate-key"} {
+		t.Run(command, func(t *testing.T) {
+			dir := t.TempDir()
+			database := filepath.Join(dir, "database-directory")
+			if err := os.Mkdir(database, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("GATEWAY_BACKUP_PASSPHRASE", backupTestPassphrase)
+			args := []string{command, "--database", database, "--secret", filepath.Join(dir, "secret.key")}
+			if command == "restore" {
+				args = append(args, "--input", filepath.Join(dir, "missing.zip"))
+			}
+			if err := run(args); err == nil {
+				t.Fatal("expected maintenance failure")
+			}
+			if _, err := os.Stat(desktop.LockPath(database)); !os.IsNotExist(err) {
+				t.Fatalf("lock retained after failure: %v", err)
+			}
+		})
+	}
+}
 
 func TestRunValidatesRestoreArguments(t *testing.T) {
 	t.Setenv("GATEWAY_BACKUP_PASSPHRASE", "")

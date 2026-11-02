@@ -2,7 +2,7 @@ module local-ai-gateway
 
 go 1.25.0
 
-toolchain go1.26.6
+toolchain go1.26.10
 
 require (
 	github.com/getlantern/systray v1.2.2

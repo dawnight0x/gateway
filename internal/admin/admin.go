@@ -68,6 +68,7 @@ func validatePriority(label string, priority int) error {
 type Service struct {
 	store      *store.Store
 	cfg        config.Config
+	cfgMu      sync.RWMutex
 	files      http.Handler
 	httpClient *http.Client
 
@@ -92,6 +93,24 @@ func New(st *store.Store, cfg config.Config) *Service {
 func (s *Service) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/admin", s.index)
 	mux.HandleFunc("/admin/", s.handle)
+}
+
+func (s *Service) configSnapshot() config.Config {
+	s.cfgMu.RLock()
+	defer s.cfgMu.RUnlock()
+	return s.cfg
+}
+
+func (s *Service) saveRouting(routing config.RoutingConfig) error {
+	// Serialize disk persistence and publication so concurrent PATCH requests
+	// cannot leave the saved file and the admin snapshot in different orders.
+	s.cfgMu.Lock()
+	defer s.cfgMu.Unlock()
+	if err := config.SaveRouting(config.ConfigPath(), routing); err != nil {
+		return err
+	}
+	s.cfg.Routing = routing
+	return nil
 }
 
 func (s *Service) index(w http.ResponseWriter, r *http.Request) {
@@ -155,24 +174,23 @@ func (s *Service) api(w http.ResponseWriter, r *http.Request) {
 			if !decodeJSONBody(w, r, &routing) {
 				return
 			}
-			candidate := s.cfg
+			candidate := s.configSnapshot()
 			candidate.Routing = routing
 			if err := candidate.Validate(); err != nil {
 				writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
 				return
 			}
-			if err := config.SaveRouting(config.ConfigPath(), routing); err != nil {
+			if err := s.saveRouting(routing); err != nil {
 				writeAdminStoreError(w, "save routing configuration", err)
 				return
 			}
-			s.cfg.Routing = routing
 			writeJSON(w, http.StatusOK, map[string]any{"routing": routing, "restartRequired": true})
 			return
 		}
 		if !requireMethod(w, r, http.MethodGet) {
 			return
 		}
-		writeJSON(w, http.StatusOK, s.cfg.Routing)
+		writeJSON(w, http.StatusOK, s.configSnapshot().Routing)
 	case "model-routes":
 		s.modelRoutes(w, r, parts)
 	case "model-states":
@@ -340,7 +358,7 @@ func (s *Service) authorizedAdmin(r *http.Request) bool {
 			token = fields[1]
 		}
 	}
-	expected := strings.TrimSpace(s.cfg.Server.AdminToken)
+	expected := strings.TrimSpace(s.configSnapshot().Server.AdminToken)
 	if token == "" || expected == "" {
 		return false
 	}
@@ -348,9 +366,10 @@ func (s *Service) authorizedAdmin(r *http.Request) bool {
 }
 
 func (s *Service) allowedAdminHost(host string) bool {
+	cfg := s.configSnapshot()
 	return allowedLocalHost(host) ||
-		sameHost(host, s.cfg.Server.Host) ||
-		sameHost(host, s.cfg.Server.PublicHost)
+		sameHost(host, cfg.Server.Host) ||
+		sameHost(host, cfg.Server.PublicHost)
 }
 
 func (s *Service) allowedAdminOrigin(raw string) bool {
@@ -396,6 +415,7 @@ func normalizedHost(host string) string {
 }
 
 func (s *Service) dashboard(w http.ResponseWriter, r *http.Request) {
+	cfg := s.configSnapshot()
 	ctx := r.Context()
 	stats, err := s.store.Stats(ctx)
 	if err != nil {
@@ -447,7 +467,7 @@ func (s *Service) dashboard(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "failed to load model health state"})
 		return
 	}
-	readiness, readinessReason := adminReadiness(providers, keys, gatewayKeys, stats, s.cfg.Server.ProxyToken)
+	readiness, readinessReason := adminReadiness(providers, keys, gatewayKeys, stats, cfg.Server.ProxyToken)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"service": map[string]any{
 			"status":                "ok",
@@ -455,10 +475,10 @@ func (s *Service) dashboard(w http.ResponseWriter, r *http.Request) {
 			"readiness":             readiness,
 			"readinessReason":       readinessReason,
 			"ready":                 readiness == "ready" || readiness == "degraded",
-			"gatewayAuthConfigured": readinesspkg.GatewayCredentialConfigured(gatewayKeys, s.cfg.Server.ProxyToken),
-			"proxyUrl":              s.cfg.PublicURL(),
-			"adminUrl":              s.cfg.PublicURL() + "/admin",
-			"timezone":              s.cfg.Storage.Timezone,
+			"gatewayAuthConfigured": readinesspkg.GatewayCredentialConfigured(gatewayKeys, cfg.Server.ProxyToken),
+			"proxyUrl":              cfg.PublicURL(),
+			"adminUrl":              cfg.PublicURL() + "/admin",
+			"timezone":              cfg.Storage.Timezone,
 		},
 		"stats":          stats,
 		"providers":      providers,
@@ -470,7 +490,7 @@ func (s *Service) dashboard(w http.ResponseWriter, r *http.Request) {
 		"modelDiscovery": modelDiscovery,
 		"modelRoutes":    modelRoutes,
 		"modelStates":    modelStates,
-		"routing":        s.cfg.Routing,
+		"routing":        cfg.Routing,
 		"snippets":       s.snippets(),
 	})
 }
@@ -647,7 +667,7 @@ func (s *Service) providers(w http.ResponseWriter, r *http.Request, parts []stri
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
 			return
 		}
-		if err := validateUpstreamSecurity(p.BaseURL, s.cfg.Routing.AllowInsecureUpstreams); err != nil {
+		if err := validateUpstreamSecurity(p.BaseURL, s.configSnapshot().Routing.AllowInsecureUpstreams); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
 			return
 		}
@@ -850,8 +870,9 @@ func (s *Service) keys(w http.ResponseWriter, r *http.Request, parts []string) {
 }
 
 func (s *Service) snippets() map[string]any {
-	root := s.cfg.PublicURL()
-	key := s.cfg.Server.ProxyToken
+	cfg := s.configSnapshot()
+	root := cfg.PublicURL()
+	key := cfg.Server.ProxyToken
 	if key == "" {
 		key = "CREATE_A_GATEWAY_KEY_IN_ADMIN"
 	}

@@ -18,7 +18,10 @@
 - 上游忽略 `stream: true` 返回完整 JSON 时，网关会转换为对应的 SSE 结果。
 - Anthropic/Gemini 与 OpenAI 的跨协议流转换只保证基础文本事件；复杂工具事件应使用同协议 Provider。
 - 已向客户端发送响应字节后发生中断，网关不会再切换 Key。
+- EOF 本身不代表完成：Chat 需要 `[DONE]` 或全部请求/已观察到的 choice 具有 `finish_reason`，Responses 需要 `response.completed` / `response.incomplete`，Anthropic 需要 `message_stop`，Gemini 需要 `finishReason`。缺少结束标记会记录 `stream_interrupted`，不会补造 `response.completed`。单流最多跟踪 1024 个 choice，避免异常上游持续增加索引导致内存无界增长。
+- Chat 的 `length` / Anthropic 的 `max_tokens` 等长度限制转换为 Responses 时使用 `response.incomplete`，保留非完整结果语义。
 - 转换状态总量限制为 64 MiB，单个工具参数限制为 16 MiB；每次下游写入使用 `stream_write_timeout_seconds` 滚动超时。
+- 上游重定向仅允许同源，最多跟随 9 次重定向（第 10 次拒绝），避免重定向循环和认证信息跨源泄露。
 
 ## Responses 状态亲和性
 

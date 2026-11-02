@@ -12,7 +12,7 @@ import (
 const modelDiscoveryStartupDelay = 2 * time.Second
 
 func (s *Service) StartModelDiscovery(parent context.Context) func() {
-	if !s.cfg.ModelDiscovery.Enabled {
+	if !s.configSnapshot().ModelDiscovery.Enabled {
 		return func() {}
 	}
 	s.discoveryMu.Lock()
@@ -35,7 +35,7 @@ func (s *Service) StartModelDiscovery(parent context.Context) func() {
 		case <-timer.C:
 			s.scheduleStaleModelDiscoveries(ctx)
 		}
-		interval := time.Duration(s.cfg.ModelDiscovery.RefreshIntervalHours) * time.Hour
+		interval := time.Duration(s.configSnapshot().ModelDiscovery.RefreshIntervalHours) * time.Hour
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 		for {
@@ -73,7 +73,7 @@ func (s *Service) scheduleStaleModelDiscoveries(ctx context.Context) {
 		slog.Warn("load keys for model discovery failed", "error", err)
 		return
 	}
-	staleBefore := time.Now().Add(-time.Duration(s.cfg.ModelDiscovery.RefreshIntervalHours) * time.Hour)
+	staleBefore := time.Now().Add(-time.Duration(s.configSnapshot().ModelDiscovery.RefreshIntervalHours) * time.Hour)
 	seen := make(map[string]struct{})
 	for _, key := range keys {
 		if !key.Enabled || !key.ProviderEnabled {
@@ -93,7 +93,7 @@ func (s *Service) scheduleStaleModelDiscoveries(ctx context.Context) {
 
 func (s *Service) scheduleProviderModelDiscovery(providerID string) {
 	providerID = strings.TrimSpace(providerID)
-	if providerID == "" || !s.cfg.ModelDiscovery.Enabled {
+	if providerID == "" || !s.configSnapshot().ModelDiscovery.Enabled {
 		return
 	}
 	s.discoveryMu.Lock()

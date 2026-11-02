@@ -18,9 +18,25 @@ if ($GoCommand) {
   }
 }
 $components = @()
+$goVersion = (& $Go env GOVERSION).Trim()
+if ($LASTEXITCODE -ne 0) { throw "read Go version failed" }
 $moduleLines = @(& $Go list -m -f '{{.Path}}|{{.Version}}|{{.Sum}}' all)
 if ($LASTEXITCODE -ne 0) {
   throw "go list failed with exit code $LASTEXITCODE"
+}
+
+# The embedded Vue runtime is shipped with the application. Build-only npm
+# packages are intentionally not represented as deployed runtime dependencies.
+$lockPath = Join-Path (Split-Path -Parent $PSScriptRoot) "package-lock.json"
+$vueVersion = (& node -e "process.stdout.write(require(process.argv[1]).packages['node_modules/vue'].version)" $lockPath).Trim()
+if ($LASTEXITCODE -ne 0) { throw "read embedded Vue version failed" }
+if ([string]::IsNullOrWhiteSpace($vueVersion)) { throw "Vue runtime version missing from lockfile" }
+$components += [ordered]@{
+  type = "library"
+  name = "vue"
+  version = $vueVersion
+  purl = "pkg:npm/vue@$vueVersion"
+  scope = "required"
 }
 $moduleLines | ForEach-Object {
   $fields = $_ -split '\|', 3
@@ -49,6 +65,7 @@ $sbom = [ordered]@{
       properties = @(
         @{ name = "${PackageName}:commit"; value = $Commit }
         @{ name = "${PackageName}:platform"; value = $Platform }
+        @{ name = "${PackageName}:go-toolchain"; value = $goVersion }
       )
     }
   }

@@ -2,12 +2,14 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
 	"strings"
 
 	"local-ai-gateway/internal/buildinfo"
+	"local-ai-gateway/internal/desktop"
 	"local-ai-gateway/internal/store"
 )
 
@@ -18,7 +20,7 @@ func main() {
 	}
 }
 
-func run(args []string) error {
+func run(args []string) (runErr error) {
 	if len(args) == 0 {
 		return usageError()
 	}
@@ -48,16 +50,26 @@ func run(args []string) error {
 	if passphrase == "" {
 		return fmt.Errorf("GATEWAY_BACKUP_PASSPHRASE is required")
 	}
+	lock, err := acquireMaintenanceLock(*database)
+	if err != nil {
+		return err
+	}
+	defer func() { runErr = errors.Join(runErr, lock.Release()) }()
 	return store.RestorePortableBackup(*input, *database, *secret, passphrase, *force)
 }
 
-func rotateKey(args []string) error {
+func rotateKey(args []string) (runErr error) {
 	flags := flag.NewFlagSet("rotate-key", flag.ContinueOnError)
 	database := flags.String("database", "data/gateway.db", "database path")
 	secret := flags.String("secret", "data/secret.key", "master key path")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
+	lock, err := acquireMaintenanceLock(*database)
+	if err != nil {
+		return err
+	}
+	defer func() { runErr = errors.Join(runErr, lock.Release()) }()
 	st, err := store.Open(*database, *secret)
 	if err != nil {
 		return err
@@ -72,6 +84,19 @@ func rotateKey(args []string) error {
 		return err
 	}
 	return st.Close()
+}
+
+func acquireMaintenanceLock(database string) (*desktop.Lock, error) {
+	// Never steal an existing lock: it may belong to a starting process whose
+	// PID has not been written yet, or be stale and require operator inspection.
+	lock, exists, err := desktop.AcquireLock(desktop.LockPath(database), false)
+	if err != nil {
+		return nil, fmt.Errorf("acquire offline maintenance lock: %w", err)
+	}
+	if exists {
+		return nil, fmt.Errorf("data directory is locked; stop gateway before offline maintenance (verify any stale gateway.lock before removing it)")
+	}
+	return lock, nil
 }
 
 func usageError() error {

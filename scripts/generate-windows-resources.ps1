@@ -81,7 +81,8 @@ function Write-VersionInfo([string]$Template, [string]$Destination) {
   }
   $info.StringFileInfo.FileVersion = $ManifestVersion
   $info.StringFileInfo.ProductVersion = $ProductVersion
-  $info | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $Destination -Encoding utf8
+  $json = $info | ConvertTo-Json -Depth 10
+  [System.IO.File]::WriteAllText($Destination, $json, [System.Text.UTF8Encoding]::new($false))
 }
 
 function Invoke-VersionResource([string]$Output, [string]$VersionInfo, [string]$Manifest) {

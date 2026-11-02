@@ -26,6 +26,9 @@ func New(responseHeaderTimeout, requestTimeout time.Duration, maxConnsPerHost in
 }
 
 func sameOriginRedirect(req *http.Request, via []*http.Request) error {
+	if len(via) >= 10 {
+		return fmt.Errorf("stopped after 10 upstream redirects")
+	}
 	if len(via) == 0 {
 		return nil
 	}

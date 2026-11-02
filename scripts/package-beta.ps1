@@ -77,7 +77,8 @@ New-Item -ItemType Directory -Force -Path $OutputRoot | Out-Null
 $StagingRoot = Join-Path $OutputRoot (".staging-" + [Guid]::NewGuid().ToString("N"))
 $WinStage = Join-Path $StagingRoot "Win-amd64"
 $LinuxStage = Join-Path $StagingRoot "linux-amd64"
-New-Item -ItemType Directory -Force -Path $WinStage,$LinuxStage | Out-Null
+$LinuxArmStage = Join-Path $StagingRoot "linux-arm64"
+New-Item -ItemType Directory -Force -Path $WinStage,$LinuxStage,$LinuxArmStage | Out-Null
 
 function Assert-SafePackagePath([string]$Path, [string]$ExpectedLeaf) {
   $full = [System.IO.Path]::GetFullPath($Path)
@@ -106,9 +107,17 @@ function Invoke-GoBuild([string]$GOOS, [string]$GOARCH, [string]$Package, [strin
   }
 }
 
+$previousToolchain = $env:GOTOOLCHAIN
 try {
   Push-Location $Root
   try {
+    $toolchainMatch = [regex]::Match((Get-Content -LiteralPath (Join-Path $Root "go.mod") -Raw), '(?m)^toolchain\s+(go\S+)\s*$')
+    if (-not $toolchainMatch.Success) {
+      throw "go.mod must declare the release toolchain"
+    }
+    $env:GOTOOLCHAIN = $toolchainMatch.Groups[1].Value
+    & $Go version
+    if ($LASTEXITCODE -ne 0) { throw "release toolchain is unavailable" }
     npm ci
     if ($LASTEXITCODE -ne 0) {
       throw "admin dependency installation failed"
@@ -137,29 +146,39 @@ try {
     Invoke-GoBuild "windows" "amd64" ".\cmd\gateway-backup" (Join-Path $WinStage "gateway-backup.exe") $CommonLdFlags
     Invoke-GoBuild "linux" "amd64" ".\cmd\gateway" (Join-Path $LinuxStage "gateway") $CommonLdFlags
     Invoke-GoBuild "linux" "amd64" ".\cmd\gateway-backup" (Join-Path $LinuxStage "gateway-backup") $CommonLdFlags
+    Invoke-GoBuild "linux" "arm64" ".\cmd\gateway" (Join-Path $LinuxArmStage "gateway") $CommonLdFlags
+    Invoke-GoBuild "linux" "arm64" ".\cmd\gateway-backup" (Join-Path $LinuxArmStage "gateway-backup") $CommonLdFlags
 
     & (Join-Path $Root "scripts\stage-release-package.ps1") -Destination $WinStage -Version $Version -Commit $Commit -BuiltAt $BuiltAt -Platform "windows/amd64" -PackageName $PackageName
     & (Join-Path $Root "scripts\stage-release-package.ps1") -Destination $LinuxStage -Version $Version -Commit $Commit -BuiltAt $BuiltAt -Platform "linux/amd64" -PackageName $PackageName
+    & (Join-Path $Root "scripts\stage-release-package.ps1") -Destination $LinuxArmStage -Version $Version -Commit $Commit -BuiltAt $BuiltAt -Platform "linux/arm64" -PackageName $PackageName
   } finally {
     Pop-Location
   }
 
   $WinTarget = Join-Path $OutputRoot "Win-amd64"
   $LinuxTarget = Join-Path $OutputRoot "linux-amd64"
+  $LinuxArmTarget = Join-Path $OutputRoot "linux-arm64"
   Assert-SafePackagePath $WinTarget "Win-amd64"
   Assert-SafePackagePath $LinuxTarget "linux-amd64"
+  Assert-SafePackagePath $LinuxArmTarget "linux-arm64"
   if (Test-Path -LiteralPath $WinTarget) {
     Remove-Item -LiteralPath $WinTarget -Recurse -Force
   }
   if (Test-Path -LiteralPath $LinuxTarget) {
     Remove-Item -LiteralPath $LinuxTarget -Recurse -Force
   }
+  if (Test-Path -LiteralPath $LinuxArmTarget) {
+    Remove-Item -LiteralPath $LinuxArmTarget -Recurse -Force
+  }
   Move-Item -LiteralPath $WinStage -Destination $WinTarget
   Move-Item -LiteralPath $LinuxStage -Destination $LinuxTarget
+  Move-Item -LiteralPath $LinuxArmStage -Destination $LinuxArmTarget
 
   $WinArchive = Join-Path $OutputRoot ("$PackageName-$Version-win-x64.zip")
   $LinuxArchive = Join-Path $OutputRoot ("$PackageName-$Version-linux-amd64.tar.gz")
-  foreach ($archive in @($WinArchive,$LinuxArchive)) {
+  $LinuxArmArchive = Join-Path $OutputRoot ("$PackageName-$Version-linux-arm64.tar.gz")
+  foreach ($archive in @($WinArchive,$LinuxArchive,$LinuxArmArchive)) {
     if (Test-Path -LiteralPath $archive) {
       Remove-Item -LiteralPath $archive -Force
     }
@@ -169,9 +188,11 @@ try {
   if ($LASTEXITCODE -ne 0) {
     throw "Linux tar archive creation failed"
   }
+  & $Tar -czf $LinuxArmArchive -C $OutputRoot "linux-arm64"
+  if ($LASTEXITCODE -ne 0) { throw "Linux arm64 tar archive creation failed" }
 
   $TopChecksums = Join-Path $OutputRoot ("$PackageName-$Version-SHA256SUMS.txt")
-  $archiveFiles = @($WinArchive,$LinuxArchive)
+  $archiveFiles = @($WinArchive,$LinuxArchive,$LinuxArmArchive)
   $archiveLines = foreach ($archive in $archiveFiles) {
     $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $archive).Hash.ToLowerInvariant()
     "$hash  $([System.IO.Path]::GetFileName($archive))"
@@ -182,9 +203,11 @@ try {
   Get-ChildItem -LiteralPath $OutputRoot -File | Where-Object { $_.Name -in @(
     [System.IO.Path]::GetFileName($WinArchive),
     [System.IO.Path]::GetFileName($LinuxArchive),
+    [System.IO.Path]::GetFileName($LinuxArmArchive),
     [System.IO.Path]::GetFileName($TopChecksums)
   ) } | Select-Object Name,Length,LastWriteTime
 } finally {
+  $env:GOTOOLCHAIN = $previousToolchain
   if (Test-Path -LiteralPath $StagingRoot) {
     Assert-SafePackagePath $StagingRoot ([System.IO.Path]::GetFileName($StagingRoot))
     Remove-Item -LiteralPath $StagingRoot -Recurse -Force

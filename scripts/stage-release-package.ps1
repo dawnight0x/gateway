@@ -30,30 +30,34 @@ if ($Destination -eq [System.IO.Path]::GetPathRoot($Destination) -or
 New-Item -ItemType Directory -Force -Path $Destination | Out-Null
 
 $sourceManifestLines = @()
-$sourcePaths = @(& git -C $Root ls-files --cached) | Sort-Object -Unique
+$sourcePaths = @(& git -C $Root ls-files --cached --others --exclude-standard -- . ':!agent.md' ':!AGENTS.md') | Sort-Object -Unique
 if ($LASTEXITCODE -ne 0) {
   throw "git ls-files failed with exit code $LASTEXITCODE"
 }
-$manifestTemp = Join-Path ([System.IO.Path]::GetTempPath()) ("gateway-source-manifest-" + [Guid]::NewGuid().ToString("N"))
-New-Item -ItemType Directory -Path $manifestTemp | Out-Null
-try {
-  foreach ($relative in $sourcePaths) {
-    $gitPath = $relative.Replace('\', '/')
-    $sourcePath = Join-Path $manifestTemp ([Guid]::NewGuid().ToString("N"))
-    & git -C $Root show "--output=$sourcePath" "HEAD:$gitPath"
-    if ($LASTEXITCODE -ne 0) {
-      throw "read committed source file $gitPath failed with exit code $LASTEXITCODE"
-    }
-    $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $sourcePath).Hash.ToLowerInvariant()
-    $sourceManifestLines += "$hash  $gitPath"
+$sourceChanges = @(& git -C $Root status --porcelain=v1 --untracked-files=normal -- . ':!agent.md' ':!AGENTS.md')
+if ($LASTEXITCODE -ne 0) {
+  throw "git status failed with exit code $LASTEXITCODE"
+}
+foreach ($relative in $sourcePaths) {
+  $gitPath = $relative.Replace('\', '/')
+  $sourcePath = Join-Path $Root $relative
+  # Build inputs are the working tree, not HEAD. Include new source files and
+  # omit deleted inputs; ignore rules keep local data and credentials excluded.
+  if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) {
+    continue
   }
-} finally {
-  Remove-Item -LiteralPath $manifestTemp -Recurse -Force
+  $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $sourcePath).Hash.ToLowerInvariant()
+  $sourceManifestLines += "$hash  $gitPath"
 }
 
 $sourceManifestText = ($sourceManifestLines -join "`n") + "`n"
-$sourceDigestBytes = [System.Security.Cryptography.SHA256]::HashData([System.Text.Encoding]::UTF8.GetBytes($sourceManifestText))
-$sourceDigest = [Convert]::ToHexString($sourceDigestBytes).ToLowerInvariant()
+$sha256 = [System.Security.Cryptography.SHA256]::Create()
+try {
+  $sourceDigestBytes = $sha256.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($sourceManifestText))
+  $sourceDigest = [BitConverter]::ToString($sourceDigestBytes).Replace('-', '').ToLowerInvariant()
+} finally {
+  $sha256.Dispose()
+}
 
 Copy-Item -LiteralPath (Join-Path $Root "docs\README-distribution.md") -Destination (Join-Path $Destination "README.md")
 Copy-Item -LiteralPath (Join-Path $Root "config.example.yaml") -Destination (Join-Path $Destination "config.example.yaml")
@@ -83,6 +87,8 @@ $metadata = [ordered]@{
   platform = $Platform
   defaultPort = 18787
   sourceSha256 = $sourceDigest
+  sourceMode = "working-tree"
+  sourceDirty = ($sourceChanges.Count -gt 0)
 }
 $metadata | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $Destination "VERSION.json") -Encoding utf8
 Write-AsciiLinesLF (Join-Path $Destination "SOURCE-MANIFEST.txt") $sourceManifestLines
@@ -93,7 +99,8 @@ $checksumLines = Get-ChildItem -LiteralPath $Destination -File -Recurse |
   Sort-Object FullName |
   ForEach-Object {
     $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $_.FullName).Hash.ToLowerInvariant()
-    $relative = [System.IO.Path]::GetRelativePath($Destination, $_.FullName).Replace('\', '/')
+    $fullPath = $_.FullName
+    $relative = $fullPath.Substring($Destination.Length).TrimStart([System.IO.Path]::DirectorySeparatorChar).Replace('\', '/')
     "$hash  $relative"
   }
 Write-AsciiLinesLF $checksumPath $checksumLines

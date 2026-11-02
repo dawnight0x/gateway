@@ -125,7 +125,7 @@ func (s *Service) tryRefreshBalancePath(ctx context.Context, key model.Key, path
 		msg := sanitizeBalanceErrorForKey(err.Error(), key.Secret)
 		return s.persistBalanceFailure(ctx, key, source, "config_error", msg)
 	}
-	reqCtx, cancel := context.WithTimeout(ctx, time.Duration(s.cfg.Routing.TimeoutSeconds)*time.Second)
+	reqCtx, cancel := context.WithTimeout(ctx, time.Duration(s.configSnapshot().Routing.TimeoutSeconds)*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, endpoint, nil)
 	if err != nil {

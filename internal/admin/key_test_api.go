@@ -172,7 +172,7 @@ func (s *Service) discoverModelsAtPath(ctx context.Context, key model.Key, path 
 		result.Error = err.Error()
 		return result
 	}
-	timeoutSeconds := s.cfg.ModelDiscovery.TimeoutSeconds
+	timeoutSeconds := s.configSnapshot().ModelDiscovery.TimeoutSeconds
 	if timeoutSeconds <= 0 || timeoutSeconds > 120 {
 		timeoutSeconds = 30
 	}
@@ -323,7 +323,7 @@ func (s *Service) tryTokenProbe(ctx context.Context, key model.Key, result *keyT
 	}
 	result.TokenEndpoint = endpoint
 	result.TokenProtocol = tokenProbeProtocol(key.ProviderType)
-	timeoutSeconds := s.cfg.Routing.TimeoutSeconds
+	timeoutSeconds := s.configSnapshot().Routing.TimeoutSeconds
 	if timeoutSeconds <= 0 || timeoutSeconds > 30 {
 		timeoutSeconds = 30
 	}

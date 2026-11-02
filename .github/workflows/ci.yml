@@ -5,6 +5,12 @@ on:
   push:
     branches: ["**"]
   pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: '23 3 * * 1'
+
+env:
+  GOTOOLCHAIN: go1.26.10
 
 permissions:
   contents: read
@@ -20,7 +26,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: 1.26.6
+          go-version: 1.26.10
           cache: true
       - uses: actions/setup-node@v4
         with:
@@ -33,6 +39,8 @@ jobs:
       - run: go mod verify
       - run: go test ./...
       - run: go vet ./...
+      - shell: pwsh
+        run: ./scripts/test-release-provenance.ps1
       - run: go build -o ${{ runner.temp }}/gateway ./cmd/gateway
       - run: go build -o ${{ runner.temp }}/gateway-backup ./cmd/gateway-backup
       - if: runner.os == 'Linux'
@@ -57,7 +65,13 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: 1.26.6
+          go-version: 1.26.10
           cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm audit --audit-level=high
       - run: go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
       - run: govulncheck ./...

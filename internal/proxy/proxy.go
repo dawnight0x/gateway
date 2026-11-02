@@ -490,8 +490,20 @@ func (s *Service) attemptKey(w http.ResponseWriter, r *http.Request, key model.K
 func (s *Service) forward(w http.ResponseWriter, r *http.Request, target string, key model.Key, inbound, upstream, gatewayRequestID string, converted protocol.ConvertedRequest) attemptResult {
 	ctx := r.Context()
 	cancel := func() {}
-	if !converted.Stream {
-		ctx, cancel = context.WithTimeout(ctx, time.Duration(s.cfg.Routing.TimeoutSeconds)*time.Second)
+	timeout := time.Duration(s.cfg.Routing.TimeoutSeconds) * time.Second
+	var streamDeadline *time.Timer
+	if converted.Stream {
+		var cancelCause context.CancelCauseFunc
+		ctx, cancelCause = context.WithCancelCause(ctx)
+		// Bound headers (including redirects) and JSON/error fallbacks. A real
+		// SSE response switches to rolling idle limits after successful headers.
+		streamDeadline = time.AfterFunc(timeout, func() { cancelCause(context.DeadlineExceeded) })
+		cancel = func() {
+			streamDeadline.Stop()
+			cancelCause(context.Canceled)
+		}
+	} else {
+		ctx, cancel = context.WithTimeout(ctx, timeout)
 	}
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, target, bytes.NewReader(converted.Body))
@@ -507,13 +519,19 @@ func (s *Service) forward(w http.ResponseWriter, r *http.Request, target string,
 
 	resp, err := s.client.Do(req)
 	if err != nil {
+		if errors.Is(context.Cause(ctx), context.DeadlineExceeded) {
+			err = context.DeadlineExceeded
+		}
 		errType := router.Classify(0, err.Error())
 		return attemptResult{status: 0, errorType: errType, message: sanitizeUpstreamMessage(err.Error(), key.Secret), retryable: router.Retryable(errType), ambiguous: true}
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		body, readErr := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		if readErr != nil {
+			return upstreamBodyFailure(ctx, readErr, key.Secret)
+		}
 		errType := router.Classify(resp.StatusCode, string(body))
 		unsupported := errType != "model_unavailable" && isUnsupportedOpenAIEndpoint(resp.StatusCode, body)
 		return attemptResult{status: resp.StatusCode, errorType: errType, message: sanitizeUpstreamMessage(errorMessage(body, resp.Status), key.Secret), retryable: unsupported || router.Retryable(errType), retryAfterSeconds: retryAfter(resp.Header.Get("Retry-After")), endpointUnsupported: unsupported, providerModelUnavailable: router.ProviderModelUnavailable(resp.StatusCode, string(body)), ambiguous: resp.StatusCode >= 500}
@@ -521,12 +539,21 @@ func (s *Service) forward(w http.ResponseWriter, r *http.Request, target string,
 
 	contentType := resp.Header.Get("Content-Type")
 	if strings.Contains(contentType, "text/event-stream") {
-		return s.pipeStream(w, resp, key, inbound, upstream)
+		if streamDeadline != nil && !streamDeadline.Stop() {
+			return upstreamBodyFailure(ctx, context.DeadlineExceeded, key.Secret)
+		}
+		var options struct {
+			N int `json:"n"`
+		}
+		if upstream == router.ProtocolOpenAI {
+			_ = json.Unmarshal(converted.Body, &options)
+		}
+		return s.pipeStream(w, resp, key, inbound, upstream, max(1, options.N))
 	}
 
 	body, err := readResponseBody(resp.Body, maxProxyResponseBody)
 	if err != nil {
-		return attemptResult{status: http.StatusBadGateway, errorType: "upstream_error", message: sanitizeUpstreamMessage(err.Error(), key.Secret), retryable: true, ambiguous: true}
+		return upstreamBodyFailure(ctx, err, key.Secret)
 	}
 	if len(bytes.TrimSpace(body)) == 0 {
 		return attemptResult{status: http.StatusBadGateway, errorType: "empty_response", message: "empty upstream response", retryable: true, ambiguous: true}
@@ -561,6 +588,14 @@ func (s *Service) forward(w http.ResponseWriter, r *http.Request, target string,
 		slog.Warn("write proxy response failed", "error", err)
 	}
 	return attemptResult{ok: true, status: resp.StatusCode, usage: protocol.ExtractUsage(out), responseResourceIDs: responseResourceIDs}
+}
+
+func upstreamBodyFailure(ctx context.Context, err error, secret string) attemptResult {
+	if errors.Is(context.Cause(ctx), context.DeadlineExceeded) {
+		err = context.DeadlineExceeded
+	}
+	errType := router.Classify(0, err.Error())
+	return attemptResult{status: http.StatusBadGateway, errorType: errType, message: sanitizeUpstreamMessage(err.Error(), secret), retryable: router.Retryable(errType), ambiguous: true}
 }
 
 func (s *Service) recordResponseAffinity(ctx context.Context, resourceIDs []string, key model.Key) {

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	"local-ai-gateway/internal/model"
@@ -72,7 +71,7 @@ func (o *streamOutput) write(data []byte) error {
 	return nil
 }
 
-func (s *Service) pipeStream(w http.ResponseWriter, resp *http.Response, key model.Key, inbound, upstream string) attemptResult {
+func (s *Service) pipeStream(w http.ResponseWriter, resp *http.Response, key model.Key, inbound, upstream string, expectedChoices ...int) attemptResult {
 	output := newStreamOutput(w, resp.StatusCode, time.Duration(s.cfg.Routing.StreamWriteTimeoutSeconds)*time.Second)
 	output.beforeCommit = func() { forwardResponseMetadataHeaders(w.Header(), resp.Header) }
 	if !s.cfg.Routing.StreamRetryBeforeFirstByte {
@@ -83,6 +82,9 @@ func (s *Service) pipeStream(w http.ResponseWriter, resp *http.Response, key mod
 		DisableAggregate:     inbound != router.ProtocolOpenAIResponses || upstream == router.ProtocolOpenAIResponses,
 		MaxAggregateBytes:    maxStreamAggregate,
 		MaxToolArgumentBytes: maxStreamToolArgument,
+	}
+	if len(expectedChoices) > 0 {
+		state.ExpectedChoices = expectedChoices[0]
 	}
 	var event string
 	var dataLines []string
@@ -119,21 +121,13 @@ func (s *Service) pipeStream(w http.ResponseWriter, resp *http.Response, key mod
 		return nil
 	}
 
-	var idleExpired atomic.Bool
 	idleTimeout := time.Duration(s.cfg.Routing.StreamIdleTimeoutSeconds) * time.Second
-	idleTimer := time.AfterFunc(idleTimeout, func() {
-		idleExpired.Store(true)
-		_ = resp.Body.Close()
-	})
-	defer idleTimer.Stop()
+	idleReader := newStreamIdleReader(resp.Body, idleTimeout)
+	defer idleReader.stop()
 
-	scanner := bufio.NewScanner(resp.Body)
+	scanner := bufio.NewScanner(idleReader)
 	scanner.Buffer(make([]byte, 32<<10), maxSSELineSize)
 	for scanner.Scan() {
-		if idleExpired.Load() {
-			return streamFailure(output, resp.StatusCode, state.Usage, errors.New("upstream stream idle timeout"), s.cfg.Routing.StreamRetryBeforeFirstByte)
-		}
-		idleTimer.Reset(idleTimeout)
 		line := strings.TrimSuffix(scanner.Text(), "\r")
 		switch {
 		case line == "":
@@ -152,9 +146,6 @@ func (s *Service) pipeStream(w http.ResponseWriter, resp *http.Response, key mod
 		}
 	}
 	readErr := scanner.Err()
-	if idleExpired.Load() {
-		readErr = errors.New("upstream stream idle timeout")
-	}
 	if readErr != nil {
 		return streamFailure(output, resp.StatusCode, state.Usage, readErr, s.cfg.Routing.StreamRetryBeforeFirstByte)
 	}
@@ -169,8 +160,11 @@ func (s *Service) pipeStream(w http.ResponseWriter, resp *http.Response, key mod
 		}
 		return attemptResult{committed: true, status: resp.StatusCode, errorType: "empty_response", message: "empty upstream stream", ambiguous: true}
 	}
+	if !state.UpstreamFinished {
+		return streamFailure(output, resp.StatusCode, state.Usage, errors.New("upstream stream ended without a terminal event"), s.cfg.Routing.StreamRetryBeforeFirstByte)
+	}
 	if inbound != upstream && !state.Finished {
-		frames, err := protocol.ConvertStreamEvent("", []byte("[DONE]"), inbound, upstream, state)
+		frames, err := protocol.FinalizeStream(inbound, state)
 		if err != nil {
 			return streamFailure(output, resp.StatusCode, state.Usage, err, false)
 		}

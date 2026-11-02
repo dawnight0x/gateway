@@ -16,7 +16,7 @@
 
 ## 离线恢复
 
-恢复时必须先停止网关，避免覆盖正在使用的 SQLite 文件。发行包已经包含恢复工具。
+恢复时必须先停止网关，避免覆盖正在使用的 SQLite 文件。发行包已经包含恢复工具。恢复和主密钥轮换会先独占同一数据目录的 `gateway.lock`；已有锁时自动拒绝执行（`--force` 也不会绕过）。如果崩溃留下锁文件，必须先确认没有网关或维护进程仍在运行，再处理遗留锁；工具不会自动抢占无法确认归属的锁。
 
 Windows：
 
@@ -45,6 +45,10 @@ export GATEWAY_BACKUP_PASSPHRASE='your-backup-passphrase'
 使用外部 `GATEWAY_MASTER_KEY` 时该命令会拒绝执行。外部密钥轮换需要由密钥管理系统提供旧、新密钥并安排离线迁移。
 
 ## 可观测性
+
+流式请求在收到 SSE 成功响应头前仍受 `routing.timeout_seconds` 约束；上游返回 JSON 或错误正文时，该超时也覆盖正文读取。真正的 SSE 改用 `stream_idle_timeout_seconds` 按收到的字节滚动计时，因此正常长流不会受普通请求总时长限制。缺少协议结束事件的 EOF 会记录为 `stream_interrupted`，不补造成功结束事件，也不会在已输出后自动重试。
+
+后台保存路由设置会串行持久化并发布完整快照，仍返回 `restartRequired: true`；代理和路由器需要重启才使用新设置。
 
 `/health` 是进程存活探针，只检查 SQLite 是否可访问；`/ready` 是面向编排和启动脚本的可用性探针，会在尚未配置 Provider、没有可用上游 Key 或没有客户端 Gateway Key 时返回 `503`，正常和降级可用时返回 `200`。需要带 Gateway Key 的详细状态可请求 `/status`，其中 `service.readiness` 与后台仪表盘保持一致。
 
