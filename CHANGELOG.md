@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.0.1
 
 - Pinned Go 1.26.10 (previously 1.26.9) and updated source-map-js to 1.2.2; added weekly Go/npm security scans.
 - Detect truncated streams without fabricating successful completion, preserve length-limited Responses semantics, and bound streaming JSON/error-body reads.
