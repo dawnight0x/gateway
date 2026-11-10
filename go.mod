@@ -6,7 +6,7 @@ toolchain go1.26.10
 
 require (
 	github.com/getlantern/systray v1.2.2
-	golang.org/x/sys v0.49.0
+	golang.org/x/sys v0.50.0
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.61.0
 )
